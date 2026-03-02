@@ -28,12 +28,28 @@ A simple, effective local website blocker and focus timer for macOS. It helps yo
 
 ## Usage
 
-Since the application modifies a system file (`/etc/hosts`), you must run the server with `sudo`:
+Since the application modifies a system file (`/etc/hosts`), you must run the server with `sudo`.
+
+### Running normally
 
 ```bash
 sudo npm start
 # or
 sudo node server.js
+```
+
+### Running in the background
+
+To keep the server running even after you close your terminal window, start it like this:
+
+```bash
+sudo nohup node server.js > server.log 2>&1 &
+```
+
+To stop the background server later, you can run:
+
+```bash
+sudo pkill -f "node server.js"
 ```
 
 Once the server is running, open your browser and navigate to:
