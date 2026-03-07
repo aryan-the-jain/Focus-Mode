@@ -175,6 +175,25 @@ app.post('/api/toggle', (req, res) => {
     res.json({ success: true, enabled: isBlockingEnabled, timerEndTime });
 });
 
+// Helper: extract a clean domain from user input (URL or domain string)
+function extractDomain(input) {
+    let cleaned = input.trim().toLowerCase();
+
+    // Strip protocol (http://, https://, ftp://, etc.)
+    cleaned = cleaned.replace(/^[a-z]+:\/\//, '');
+
+    // Strip path, query string, hash, and port
+    cleaned = cleaned.split('/')[0].split('?')[0].split('#')[0];
+
+    // Strip port number (e.g., :8080)
+    cleaned = cleaned.replace(/:\d+$/, '');
+
+    // Strip leading/trailing dots
+    cleaned = cleaned.replace(/^\.+|\.+$/g, '');
+
+    return cleaned;
+}
+
 // Add a domain to block
 app.post('/api/domains', (req, res) => {
     let { domain } = req.body;
@@ -183,27 +202,41 @@ app.post('/api/domains', (req, res) => {
         return res.status(400).json({ error: 'domain must be a valid string' });
     }
 
-    domain = domain.trim().toLowerCase();
+    domain = extractDomain(domain);
 
-    if (!domain.includes('.')) {
+    if (!domain || !domain.includes('.')) {
         return res.status(400).json({ error: 'invalid domain format' });
     }
 
-    if (!blockedDomains.includes(domain)) {
-        blockedDomains.push(domain);
+    // Build list of variants to add (base, www., m.)
+    const variants = [domain];
 
-        // Auto-add 'www.' variant if missing
-        if (!domain.startsWith('www.')) {
-            const wwwDomain = `www.${domain}`;
-            if (!blockedDomains.includes(wwwDomain)) {
-                blockedDomains.push(wwwDomain);
-            }
-        }
+    // Get the base domain (without www. or m. prefix) so we can generate all variants
+    let baseDomain = domain;
+    if (baseDomain.startsWith('www.')) {
+        baseDomain = baseDomain.substring(4);
+    } else if (baseDomain.startsWith('m.')) {
+        baseDomain = baseDomain.substring(2);
+    }
 
-        // If blocking is currently ON, update the file immediately
-        if (isBlockingEnabled) {
-            updateHostsSystem(true);
+    // Ensure the bare domain and common subdomains are all included
+    if (!variants.includes(baseDomain)) variants.push(baseDomain);
+    const wwwDomain = `www.${baseDomain}`;
+    if (!variants.includes(wwwDomain)) variants.push(wwwDomain);
+    const mDomain = `m.${baseDomain}`;
+    if (!variants.includes(mDomain)) variants.push(mDomain);
+
+    let added = false;
+    variants.forEach(v => {
+        if (!blockedDomains.includes(v)) {
+            blockedDomains.push(v);
+            added = true;
         }
+    });
+
+    // If blocking is currently ON, update the file immediately
+    if (added && isBlockingEnabled) {
+        updateHostsSystem(true);
     }
 
     res.json({ success: true, domains: blockedDomains });
