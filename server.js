@@ -26,7 +26,22 @@ let blockedDomains = [
     'googlevideo.com',
     'youtu.be',
     'reddit.com',
-    'www.reddit.com'
+    'www.reddit.com',
+    'm.reddit.com',
+    'web.whatsapp.com',
+    'whatsapp.com',
+    'www.whatsapp.com',
+    'mail.google.com',
+    'gmail.com',
+    'www.gmail.com',
+    'outlook.live.com',
+    'outlook.office.com',
+    'outlook.office365.com',
+    'outlook.com',
+    'www.outlook.com',
+    'linkedin.com',
+    'www.linkedin.com',
+    'm.linkedin.com'
 ];
 let isBlockingEnabled = false;
 
