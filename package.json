@@ -1,17 +1,19 @@
 {
-  "name": "focus-timer",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "focus-mode",
+  "version": "2.0.0",
+  "description": "A focus timer and system-wide website blocker for macOS",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "FOCUS_HOSTS_FILE=./data/hosts.dev FOCUS_DATA_DIR=./data/dev node server.js",
+    "service:install": "bash scripts/install-service.sh",
+    "service:uninstall": "bash scripts/uninstall-service.sh"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
   "dependencies": {
-    "body-parser": "^2.2.2",
-    "cors": "^2.8.6",
     "express": "^5.2.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
