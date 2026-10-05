@@ -43,6 +43,21 @@ const RELATED_DOMAINS = {
 // State
 // ---------------------------------------------------------------------------
 
+// YouTube allowance: a daily budget, watched at most one sitting at a time.
+// The Chrome extension reports when you're actually watching; only that time
+// counts. After a full sitting YouTube locks for a break.
+const defaultAllowance = () => ({
+    enabled: true,
+    sites: ['youtube.com'],
+    dailyMinutes: 180,
+    sittingMinutes: 60,
+    breakMinutes: 30,
+    usage: {}, // { 'YYYY-MM-DD': ms watched }
+    sitting: { usedMs: 0, lastWatchedAt: 0 },
+    cooldownUntil: 0,
+    pending: null, // { enabled, dailyMinutes, sittingMinutes, breakMinutes, effectiveDay }
+});
+
 const defaultState = () => ({
     mode: 'idle', // 'idle' | 'session' | 'block'
     session: null, // { startedAt, endsAt, plannedMinutes, intention }
@@ -50,6 +65,7 @@ const defaultState = () => ({
     sites: [...DEFAULT_SITES],
     settings: { earlyEnd: 'phrase', passwordHash: null, passwordSalt: null },
     history: [], // { startedAt, endedAt, plannedMinutes, intention, completed }
+    allowance: defaultAllowance(),
 });
 
 let state = defaultState();
@@ -57,7 +73,20 @@ let state = defaultState();
 const loadState = () => {
     try {
         const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-        state = { ...defaultState(), ...saved, settings: { ...defaultState().settings, ...saved.settings } };
+        const defaults = defaultState();
+        state = {
+            ...defaults,
+            ...saved,
+            settings: { ...defaults.settings, ...saved.settings },
+            allowance: { ...defaults.allowance, ...saved.allowance },
+        };
+        // Older versions tracked usage per meal slot.
+        const a = state.allowance;
+        delete a.slots;
+        Object.keys(a.usage).forEach((day) => {
+            if (typeof a.usage[day] === 'object') a.usage[day] = Object.values(a.usage[day]).reduce((x, y) => x + y, 0);
+        });
+        if (a.pending && a.pending.slots) a.pending = null;
         return true;
     } catch (error) {
         if (error.code !== 'ENOENT') console.error('Could not read state file, starting fresh:', error.message);
@@ -105,7 +134,16 @@ const expandSite = (domain) => {
     return [...hosts];
 };
 
-const allBlockedHosts = () => [...new Set(state.sites.flatMap(expandSite))];
+// Sites that should be blocked right now: the blocklist during focus/blocking,
+// plus YouTube whenever the allowance doesn't permit it.
+const blockedSites = () => {
+    const sites = new Set();
+    if (state.mode !== 'idle') state.sites.forEach((d) => sites.add(d));
+    if (!youtubeAccess().allowed) state.allowance.sites.forEach((d) => sites.add(d));
+    return [...sites];
+};
+
+const allBlockedHosts = () => [...new Set(blockedSites().flatMap(expandSite))];
 
 // ---------------------------------------------------------------------------
 // Hosts file
@@ -148,7 +186,7 @@ const syncHosts = () => {
     const current = readHosts();
     let desired = stripBlockSection(current);
     if (desired && !desired.endsWith('\n')) desired += '\n';
-    if (state.mode !== 'idle' && state.sites.length > 0) desired += buildBlockSection();
+    if (blockedSites().length > 0) desired += buildBlockSection();
 
     if (desired === current) return false;
     fs.writeFileSync(HOSTS_FILE, desired, 'utf8');
@@ -161,6 +199,151 @@ const backupHostsOnce = () => {
     if (fs.existsSync(backup)) return;
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(backup, stripBlockSection(readHosts()));
+};
+
+// ---------------------------------------------------------------------------
+// Allowance
+// ---------------------------------------------------------------------------
+
+// The YouTube day runs 4am to 4am, so late nights count toward the day before.
+const DAY_START_HOUR = 4;
+
+const dayKey = (ts = Date.now()) => {
+    const d = new Date(ts);
+    d.setHours(d.getHours() - DAY_START_HOUR);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// Next 4am, when today's budget resets.
+const nextDayStart = (ts = Date.now()) => {
+    const d = new Date(ts);
+    d.setHours(DAY_START_HOUR, 0, 0, 0);
+    if (d.getTime() <= ts) d.setDate(d.getDate() + 1);
+    return d.getTime();
+};
+
+const HEARTBEAT_TIMEOUT_MS = 75 * 1000; // extension pings at least every 30s
+const ACCRUE_GRACE_MS = 30 * 1000; // count at most this long past the last ping
+
+// Live data from the Chrome extension. Not persisted: it reconnects on its own.
+const monitor = { lastSeenAt: 0, watching: false, watchingSince: null };
+
+const extensionConnected = (now = Date.now()) => now - monitor.lastSeenAt < HEARTBEAT_TIMEOUT_MS;
+
+const liveWatchMs = (now = Date.now()) => {
+    if (!monitor.watching || !monitor.watchingSince) return 0;
+    return Math.max(0, Math.min(now, monitor.lastSeenAt + ACCRUE_GRACE_MS) - monitor.watchingSince);
+};
+
+const dailyUsedMs = (now = Date.now()) => {
+    const a = state.allowance;
+    return Math.min((a.usage[dayKey(now)] || 0) + liveWatchMs(now), a.dailyMinutes * 60000);
+};
+
+// A sitting resets once you've stayed away for a full break.
+const sittingUsedMs = (now = Date.now()) => {
+    const { sitting, breakMinutes, sittingMinutes } = state.allowance;
+    if (!monitor.watching && now - sitting.lastWatchedAt >= breakMinutes * 60000) return 0;
+    return Math.min(sitting.usedMs + liveWatchMs(now), sittingMinutes * 60000);
+};
+
+// Move watched time since the last check into today's usage and the sitting.
+const accrue = (now = Date.now()) => {
+    if (!monitor.watching || !monitor.watchingSince) return;
+    const a = state.allowance;
+    const end = Math.min(now, monitor.lastSeenAt + ACCRUE_GRACE_MS);
+    const add = Math.max(0, end - monitor.watchingSince);
+    const day = dayKey(monitor.watchingSince);
+    a.usage[day] = Math.min((a.usage[day] || 0) + add, a.dailyMinutes * 60000);
+    a.sitting.usedMs += add;
+    a.sitting.lastWatchedAt = end;
+
+    if (a.sitting.usedMs >= a.sittingMinutes * 60000) {
+        a.cooldownUntil = end + a.breakMinutes * 60000;
+        a.sitting = { usedMs: 0, lastWatchedAt: end };
+        monitor.watching = false;
+        monitor.watchingSince = null;
+    } else if (end < now) {
+        monitor.watching = false;
+        monitor.watchingSince = null;
+    } else {
+        monitor.watchingSince = now;
+    }
+};
+
+// Whether YouTube should be reachable right now, and why not.
+const youtubeAccess = (now = Date.now()) => {
+    const a = state.allowance;
+    if (!a.enabled) return { allowed: true, reason: 'unlimited' };
+    if (state.mode === 'session') return { allowed: false, reason: 'focus' };
+    if (state.mode === 'block') return { allowed: false, reason: 'block' };
+    if (dailyUsedMs(now) >= a.dailyMinutes * 60000) return { allowed: false, reason: 'daily' };
+    if (now < a.cooldownUntil || sittingUsedMs(now) >= a.sittingMinutes * 60000) return { allowed: false, reason: 'cooldown' };
+    if (!extensionConnected(now)) return { allowed: false, reason: 'extension' };
+    return { allowed: true, reason: 'open' };
+};
+
+const youtubeStatus = (now = Date.now()) => {
+    const a = state.allowance;
+    const access = youtubeAccess(now);
+    const dailyMs = a.dailyMinutes * 60000;
+    const sittingMs = a.sittingMinutes * 60000;
+    const daily = dailyUsedMs(now);
+    const sitting = sittingUsedMs(now);
+    let cooldownUntil = null;
+    if (access.reason === 'cooldown') cooldownUntil = now < a.cooldownUntil ? a.cooldownUntil : now + a.breakMinutes * 60000;
+    return {
+        ...access,
+        remainingMs: Math.max(0, Math.min(dailyMs - daily, sittingMs - sitting)),
+        dailyUsedMs: daily,
+        dailyMs,
+        sittingUsedMs: sitting,
+        sittingMs,
+        breakMs: a.breakMinutes * 60000,
+        cooldownUntil,
+        resetsAt: nextDayStart(now),
+        watching: monitor.watching && access.allowed,
+        focusEndsAt: state.mode === 'session' ? state.session.endsAt : null,
+        now,
+    };
+};
+
+const pruneUsage = () => {
+    const cutoff = dayKey(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    Object.keys(state.allowance.usage).forEach((k) => {
+        if (k < cutoff) delete state.allowance.usage[k];
+    });
+};
+
+const LIMITS = { dailyMinutes: [1, 720], sittingMinutes: [1, 240], breakMinutes: [0, 240] };
+
+const validateLimits = (body, current) => {
+    const out = {};
+    for (const [key, [min, max]] of Object.entries(LIMITS)) {
+        const v = body[key] === undefined ? current[key] : Math.round(Number(body[key]));
+        if (!Number.isFinite(v) || v < min || v > max) return null;
+        out[key] = v;
+    }
+    return out;
+};
+
+// A change that only ever gives you less YouTube can apply immediately.
+const isTightening = (oldA, next) => {
+    if (!oldA.enabled) return true;
+    if (!next.enabled) return false;
+    return next.dailyMinutes <= oldA.dailyMinutes
+        && next.sittingMinutes <= oldA.sittingMinutes
+        && next.breakMinutes >= oldA.breakMinutes;
+};
+
+const applyAllowanceConfig = (next) => {
+    accrue();
+    const a = state.allowance;
+    a.enabled = next.enabled;
+    a.dailyMinutes = next.dailyMinutes;
+    a.sittingMinutes = next.sittingMinutes;
+    a.breakMinutes = next.breakMinutes;
+    a.pending = null;
 };
 
 // ---------------------------------------------------------------------------
@@ -185,10 +368,28 @@ const finishSession = (completed) => {
 };
 
 let lastEnforced = 0;
+let lastYoutubeAllowed = null;
 const tick = () => {
     if (state.mode === 'session' && Date.now() >= state.session.endsAt) {
         finishSession(true);
         return;
+    }
+    const a = state.allowance;
+    // Block or unblock YouTube the moment access changes (sitting or daily
+    // limit reached, break over, extension disconnects).
+    const access = youtubeAccess();
+    if (access.allowed !== lastYoutubeAllowed) {
+        lastYoutubeAllowed = access.allowed;
+        accrue();
+        saveState();
+        syncHosts();
+        console.log(`YouTube ${access.allowed ? 'unblocked' : `blocked (${access.reason})`}.`);
+    }
+    if (a.pending && dayKey() >= a.pending.effectiveDay) {
+        applyAllowanceConfig(a.pending);
+        saveState();
+        syncHosts();
+        console.log('Applied scheduled allowance changes.');
     }
     // Re-apply the block if someone edited /etc/hosts by hand mid-session.
     if (Date.now() - lastEnforced >= ENFORCE_EVERY_MS) {
@@ -227,7 +428,8 @@ app.use((req, res, next) => {
     const host = req.headers.host;
     if (!allowedHosts.has(host)) return res.status(403).send('Forbidden');
     const origin = req.headers.origin;
-    if (req.method !== 'GET' && origin && origin !== `http://${host}`) {
+    const fromExtension = origin && origin.startsWith('chrome-extension://') && req.path.startsWith('/api/youtube/');
+    if (req.method !== 'GET' && origin && origin !== `http://${host}` && !fromExtension) {
         return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
     }
     next();
@@ -249,7 +451,22 @@ const publicState = () => {
             phrase: EARLY_END_PHRASE,
         },
         history: state.history.filter((h) => h.endedAt >= since),
+        allowance: publicAllowance(),
         now: Date.now(),
+    };
+};
+
+const publicAllowance = () => {
+    const a = state.allowance;
+    return {
+        enabled: a.enabled,
+        sites: a.sites,
+        dailyMinutes: a.dailyMinutes,
+        sittingMinutes: a.sittingMinutes,
+        breakMinutes: a.breakMinutes,
+        pending: a.pending,
+        status: youtubeStatus(),
+        extension: { connected: extensionConnected(), path: path.join(__dirname, 'extension') },
     };
 };
 
@@ -280,6 +497,7 @@ app.post('/api/session/start', (req, res) => {
     const intention = typeof req.body.intention === 'string' ? req.body.intention.trim().slice(0, 120) : '';
     const now = Date.now();
     withHosts(res, () => {
+        accrue();
         state.mode = 'session';
         state.blockStartedAt = null;
         state.session = { startedAt: now, endsAt: now + minutes * 60 * 1000, plannedMinutes: minutes, intention };
@@ -318,6 +536,7 @@ app.post('/api/block/start', (req, res) => {
     if (state.mode !== 'idle') return fail(res, 409, 'Blocking is already on.');
     if (state.sites.length === 0) return fail(res, 400, 'Add at least one site to block first.');
     withHosts(res, () => {
+        accrue();
         state.mode = 'block';
         state.blockStartedAt = Date.now();
     });
@@ -374,6 +593,51 @@ app.put('/api/settings', (req, res) => {
     res.json(publicState());
 });
 
+// Chrome extension check-in: reports whether a YouTube video is playing or a
+// YouTube tab is in front of you. Returns what the extension should enforce.
+app.post('/api/youtube/heartbeat', (req, res) => {
+    const now = Date.now();
+    accrue(now);
+    monitor.lastSeenAt = now;
+    const access = youtubeAccess(now);
+    const watching = req.body.watching === true && access.allowed && access.reason === 'open';
+    if (watching && !monitor.watching) {
+        const a = state.allowance;
+        if (now - a.sitting.lastWatchedAt >= a.breakMinutes * 60000) a.sitting = { usedMs: 0, lastWatchedAt: now };
+        monitor.watchingSince = now;
+    }
+    if (!watching) monitor.watchingSince = null;
+    monitor.watching = watching;
+    pruneUsage();
+    saveState();
+    if (access.allowed !== lastYoutubeAllowed) {
+        lastYoutubeAllowed = access.allowed;
+        syncHosts();
+    }
+    res.json(youtubeStatus(now));
+});
+
+app.get('/api/youtube/status', (req, res) => res.json(youtubeStatus()));
+
+app.put('/api/allowance', (req, res) => {
+    if (state.mode === 'session') return fail(res, 423, 'Settings are locked during a focus session.');
+    const a = state.allowance;
+    const enabled = req.body.enabled === undefined ? a.enabled : Boolean(req.body.enabled);
+    const limits = validateLimits(req.body, a);
+    if (!limits) return fail(res, 400, 'Daily limit 1–720 min, sitting 1–240 min, break 0–240 min.');
+    if (limits.sittingMinutes > limits.dailyMinutes) return fail(res, 400, 'A sitting can’t be longer than the daily limit.');
+
+    const next = { enabled, ...limits };
+    const immediate = isTightening(a, next);
+    withHosts(res, () => {
+        if (immediate) {
+            applyAllowanceConfig(next);
+        } else {
+            a.pending = { ...next, effectiveDay: dayKey(nextDayStart()) };
+        }
+    });
+});
+
 app.delete('/api/history', (req, res) => {
     state.history = [];
     saveState();
@@ -403,12 +667,7 @@ if (process.argv.includes('--unblock')) {
     process.exit(0);
 }
 
-const hadState = loadState();
-if (!hadState && readHosts().includes(MARKER_START)) {
-    // Upgrading from the old version while it was blocking: keep blocking.
-    state.mode = 'block';
-    state.blockStartedAt = Date.now();
-}
+loadState();
 if (state.mode === 'session' && !state.session) state.mode = 'idle';
 saveState();
 backupHostsOnce();
