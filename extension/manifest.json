@@ -1,0 +1,14 @@
+{
+    "manifest_version": 3,
+    "name": "Focus Mode: YouTube meter",
+    "version": "1.0.0",
+    "description": "Counts your YouTube allowance only while you're watching, and closes YouTube when time's up.",
+    "permissions": ["tabs", "alarms", "storage", "scripting"],
+    "host_permissions": ["http://localhost:7878/*", "*://*.youtube.com/*"],
+    "background": { "service_worker": "background.js" },
+    "content_scripts": [
+        { "matches": ["*://*.youtube.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+    ],
+    "action": { "default_title": "Focus Mode" },
+    "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+}
