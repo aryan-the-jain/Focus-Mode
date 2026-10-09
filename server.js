@@ -49,8 +49,8 @@ const RELATED_DOMAINS = {
 const defaultAllowance = () => ({
     enabled: true,
     sites: ['youtube.com'],
-    dailyMinutes: 180,
-    sittingMinutes: 60,
+    dailyMinutes: 120,
+    sittingMinutes: 40,
     breakMinutes: 30,
     usage: {}, // { 'YYYY-MM-DD': ms watched }
     sitting: { usedMs: 0, lastWatchedAt: 0 },
