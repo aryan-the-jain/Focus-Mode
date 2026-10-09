@@ -42,6 +42,7 @@
             </div>
         </header>
 
+        <div class="col col-a">
         <!-- Timer -->
         <section class="card timer-card" id="timer-card" data-mode="idle">
             <div class="ring-wrap">
@@ -86,6 +87,7 @@
             </div>
         </section>
 
+
         <!-- Stats -->
         <section class="card stats-card">
             <div class="stats">
@@ -104,9 +106,49 @@
             </div>
             <div class="week" id="week" aria-label="Focus minutes, last 7 days"></div>
         </section>
+        </div>
+
+        <div class="col col-b">
+        <!-- YouTube allowance -->
+        <section class="card yt-card" id="yt-card" hidden>
+            <div class="card-head">
+                <h2><span class="yt-mark" aria-hidden="true"></span>YouTube</h2>
+                <span class="muted" id="yt-summary"></span>
+            </div>
+
+            <div class="yt-now" id="yt-now">
+                <div class="yt-now-label" id="yt-now-label"></div>
+                <div class="yt-now-time" id="yt-now-time"></div>
+                <div class="yt-now-sub" id="yt-now-sub"><span class="live-dot"></span><span id="yt-now-text"></span></div>
+            </div>
+
+            <div class="yt-connect" id="yt-connect" hidden>
+                <p class="yt-connect-title">Connect the Chrome extension</p>
+                <p class="hint">It counts your time only while you’re watching. YouTube stays blocked until it’s connected.</p>
+                <ol>
+                    <li>Open <button type="button" class="copy" data-copy="chrome://extensions">chrome://extensions</button> in a new tab</li>
+                    <li>Turn on <strong>Developer mode</strong> (top right)</li>
+                    <li>Click <strong>Load unpacked</strong> and choose <button type="button" class="copy" id="ext-path" data-copy=""></button></li>
+                </ol>
+                <p class="hint">Click the grey text to copy it. In the folder picker, press ⌘⇧G and paste the path.</p>
+            </div>
+
+            <div class="yt-meters">
+                <div class="meter">
+                    <div class="meter-head"><span>Today</span><span class="muted" id="yt-daily-label"></span></div>
+                    <div class="meter-bar"><div id="yt-daily-bar"></div></div>
+                </div>
+                <div class="meter">
+                    <div class="meter-head"><span>This sitting</span><span class="muted" id="yt-sitting-label"></span></div>
+                    <div class="meter-bar"><div id="yt-sitting-bar"></div></div>
+                </div>
+            </div>
+            <p class="hint yt-note" id="yt-note"></p>
+        </section>
+
 
         <!-- Blocklist -->
-        <section class="card">
+        <section class="card blocks-card">
             <div class="card-head">
                 <h2>Blocklist</h2>
                 <span class="muted" id="site-count"></span>
@@ -127,6 +169,8 @@
 
             <ul class="site-list" id="site-list"></ul>
         </section>
+
+        </div>
 
         <footer class="foot">Blocks sites in every browser by editing <code>/etc/hosts</code>.</footer>
     </main>
@@ -187,8 +231,20 @@
                 <p class="hint">Tip: have a friend set this so you don’t know it.</p>
             </fieldset>
 
+            <fieldset class="setting" id="yt-setting">
+                <legend>YouTube allowance</legend>
+                <label class="check"><input type="checkbox" id="yt-enabled"> Limit how much YouTube I watch</label>
+                <div class="yt-edit" id="yt-edit">
+                    <label class="yt-edit-row"><span>Daily limit</span><span class="mins"><input type="number" id="yt-daily" min="1" max="720" required> min</span></label>
+                    <label class="yt-edit-row"><span>Max in one sitting</span><span class="mins"><input type="number" id="yt-sitting" min="1" max="240" required> min</span></label>
+                    <label class="yt-edit-row"><span>Break after a sitting</span><span class="mins"><input type="number" id="yt-break" min="0" max="240" required> min</span></label>
+                </div>
+                <p class="hint">Time only counts while a YouTube video is playing with sound, or a YouTube tab is in front of you. A sitting resets after a break of that length. Your budget resets at 4am. Changes that give you more time start at the next reset. Changes that give you less start now.</p>
+                <p class="lock-note" id="yt-pending-note" hidden></p>
+            </fieldset>
+
             <fieldset class="setting">
-                <legend>When a session ends</legend>
+                <legend>When focus or YouTube time ends</legend>
                 <label class="check"><input type="checkbox" id="pref-sound"> Play a chime</label>
                 <label class="check"><input type="checkbox" id="pref-notify"> Show a desktop notification</label>
             </fieldset>
