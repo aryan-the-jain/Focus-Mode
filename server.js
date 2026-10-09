@@ -99,6 +99,8 @@ const defaultState = () => ({
     // Daily timers for sites metered by the extension (time the tab is in front of you).
     timers: { linkedin: { label: 'LinkedIn', domain: 'linkedin.com', dailyMinutes: 10, enabled: true, pending: null } },
     timerUsage: {}, // 'YYYY-MM-DD' -> { timerId: ms }
+    // Weekly pass: once a week, on this day, entertainment is uncapped until the 4am reset.
+    pass: { day: 5, activeUntil: 0, usedWeek: null }, // day: 0 = Sunday ... 5 = Friday
     // Loop breaker: bouncing between inbox-type sites blocks them for a while.
     loop: {
         enabled: true,
@@ -130,6 +132,7 @@ const loadState = () => {
             night: { ...defaults.night, ...saved.night },
             timers: { ...defaults.timers, ...saved.timers },
             loop: { ...defaults.loop, ...saved.loop, apps: defaults.loop.apps, blockSites: defaults.loop.blockSites },
+            pass: { ...defaults.pass, ...saved.pass },
         };
         // Older versions tracked usage per meal slot.
         const a = state.allowance;
@@ -357,11 +360,47 @@ const accrue = (now = Date.now()) => {
 };
 
 // Whether YouTube should be reachable right now, and why not.
+// ---------------------------------------------------------------------------
+// Weekly pass
+// ---------------------------------------------------------------------------
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// The 4am-based calendar day, and its ISO week, so one pass per week.
+const passDate = (ts) => new Date(ts - DAY_START_HOUR * 60 * 60 * 1000);
+const weekKey = (ts) => {
+    const d = passDate(ts);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    const n = 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+    return `${d.getFullYear()}-W${n}`;
+};
+const passActive = (now = Date.now()) => now < state.pass.activeUntil;
+const passUsedThisWeek = (now = Date.now()) => state.pass.usedWeek === weekKey(now);
+const passAvailable = (now = Date.now()) => !passActive(now) && !passUsedThisWeek(now)
+    && passDate(now).getDay() === state.pass.day && state.mode !== 'session';
+
+const passStatus = (now = Date.now()) => {
+    const next = new Date(nextDayStart(now));
+    while (next.getDay() !== state.pass.day) next.setDate(next.getDate() + 1);
+    return {
+        day: state.pass.day,
+        dayName: DAYS[state.pass.day],
+        active: passActive(now),
+        activeUntil: passActive(now) ? state.pass.activeUntil : null,
+        available: passAvailable(now),
+        usedThisWeek: passUsedThisWeek(now),
+        nextDate: next.getTime(),
+    };
+};
+
 const youtubeAccess = (now = Date.now()) => {
     const a = state.allowance;
     if (!a.enabled) return { allowed: true, reason: 'unlimited' };
     if (state.mode === 'session') return { allowed: false, reason: 'focus' };
     if (state.mode === 'block') return { allowed: false, reason: 'block' };
+    if (passActive(now)) return { allowed: true, reason: 'pass' };
     if (!openWindow(now).isOpen) return { allowed: false, reason: 'hours' };
     if (dailyUsedMs(now) >= a.dailyMinutes * 60000) return { allowed: false, reason: 'daily' };
     if (now < a.cooldownUntil || sittingUsedMs(now) >= a.sittingMinutes * 60000) return { allowed: false, reason: 'cooldown' };
@@ -513,6 +552,7 @@ const loopStatus = (now = Date.now()) => {
 // Everything the extension needs to meter and enforce.
 const extensionStatus = (now = Date.now()) => ({
     ...youtubeStatus(now),
+    pass: passStatus(now),
     timers: timerStatus(now),
     loop: loopStatus(now),
     entertainment: {
@@ -554,6 +594,7 @@ const youtubeBreak = (now = Date.now()) => youtubeAccess(now).reason === 'cooldo
 const meteredEntertainment = () => state.night.sites.filter((d) => !state.night.breakExempt.includes(d));
 
 const entertainmentBlocked = (now = Date.now()) => {
+    if (passActive(now) && state.mode === 'idle') return [];
     if (nightActive(now)) return state.night.sites;
     if (state.allowance.enabled && !youtubeAccess(now).allowed) return meteredEntertainment();
     return [];
@@ -744,6 +785,7 @@ const publicState = () => {
             meetingMinutes: state.settings.meetingMinutes,
         },
         timers: timerStatus(),
+        pass: passStatus(),
         loop: loopStatus(),
         night: {
             enabled: state.night.enabled,
@@ -1000,6 +1042,29 @@ app.put('/api/timers/:id', (req, res) => {
         if (loosening) t.pending = { dailyMinutes, enabled, effectiveDay: dayKey(nextDayStart()) };
         else Object.assign(t, { dailyMinutes, enabled, pending: null });
     });
+});
+
+app.post('/api/pass/start', (req, res) => {
+    const now = Date.now();
+    if (passActive(now)) return fail(res, 409, 'Your pass is already on.');
+    if (passUsedThisWeek(now)) return fail(res, 409, 'You’ve used this week’s pass.');
+    if (passDate(now).getDay() !== state.pass.day) return fail(res, 403, `Your pass is for ${DAYS[state.pass.day]}s.`);
+    if (state.mode === 'session') return fail(res, 423, 'Finish your focus session first.');
+    withHosts(res, () => {
+        accrue(now);
+        state.pass.activeUntil = nextDayStart(now);
+        state.pass.usedWeek = weekKey(now);
+        console.log(`Weekly pass on until ${new Date(state.pass.activeUntil).toLocaleString()}.`);
+    });
+});
+
+app.put('/api/pass', (req, res) => {
+    if (passActive()) return fail(res, 423, 'Change your pass day after tonight.');
+    const day = Math.round(Number(req.body.day));
+    if (!Number.isInteger(day) || day < 0 || day > 6) return fail(res, 400, 'Pick a day of the week.');
+    state.pass.day = day;
+    saveState();
+    res.json(publicState());
 });
 
 app.put('/api/loop', (req, res) => {
