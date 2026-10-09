@@ -11,9 +11,30 @@ It works by adding entries to `/etc/hosts`, so it doesn't depend on a browser ex
 - **Blocking that holds.** During a session you can't remove sites from the list or change settings. If `/etc/hosts` is edited by hand, the block is put back within 15 seconds.
 - **Survives restarts.** Your blocklist, settings, history, and any running session are saved to disk. If your Mac reboots mid-session, the session carries on, and it ends correctly even if the end time passed while the Mac was off.
 - **One entry per site.** Add `youtube.com` and it also blocks `www.`, `m.`, and the related addresses the site needs to load (`youtu.be`, `ytimg.com`, `googlevideo.com`, …).
+- **Daily YouTube allowance.** 3 hours a day, at most 1 hour at a time, and a Chrome extension counts only the time you actually spend watching. [More below](#youtube-allowance).
 - **Stats.** Minutes focused today, sessions completed, your daily streak, and a 7-day chart.
 - **Open-ended blocking.** Block sites with no timer, and unblock whenever you like.
 - A chime and an optional desktop notification when a session ends. Light and dark mode follow your system setting.
+
+## YouTube allowance
+
+- **3 hours a day, no more than 1 hour at a time.** After a full hour of watching, YouTube locks for a 30-minute break.
+- **Time only counts while you're watching**, meaning a YouTube video is playing with sound, or a YouTube tab is in front of you. If you pause, switch tabs or leave it in the background, the clock stops. There's nothing to click.
+- **Pausing doesn't reset the hour.** A sitting only starts over after you've been away for the full break, so short pauses don't earn a fresh hour.
+- **The budget resets at 4am**, so late nights count toward the day before.
+- A small pill in the corner of YouTube shows how long you have left in this sitting, and the extension's toolbar badge shows the minutes. You get a warning at 5 minutes.
+- When time runs out, every YouTube tab is replaced with a page that says when YouTube opens again, and YouTube is blocked at the system level.
+- **YouTube only opens while the Chrome extension is connected.** If you turn the extension off or close Chrome, YouTube stays blocked, so switching it off doesn't give you extra time.
+- During a focus session YouTube is always blocked.
+- You can change all three numbers in Settings. Changes that give you more time (a higher limit or a shorter break) wait until the next 4am reset. Changes that give you less apply right away.
+
+### Install the extension (Chrome)
+
+1. Run `npm run service:install` first. It copies the extension to `/usr/local/lib/focus-mode/extension`.
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked**, press ⌘⇧G, paste `/usr/local/lib/focus-mode/extension`, and choose it.
+
+After updating Focus Mode, click the reload icon on the extension's card in `chrome://extensions`.
 
 ## Install (recommended)
 
