@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
     <title>Focus</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%232f7a64' stroke-width='5'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%23888888' stroke-width='5'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -21,6 +21,26 @@
         </symbol>
         <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M12 5v14M5 12h14" />
+        </symbol>
+        <symbol id="i-scholar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z" />
+            <path d="M22 10v6" />
+            <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />
+        </symbol>
+        <symbol id="i-sidequest" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5" />
+            <line x1="13" x2="19" y1="19" y2="13" />
+            <line x1="16" x2="20" y1="16" y2="20" />
+            <line x1="19" x2="21" y1="21" y2="19" />
+            <polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5" />
+            <line x1="5" x2="9" y1="14" y2="18" />
+            <line x1="7" x2="4" y1="17" y2="20" />
+            <line x1="3" x2="5" y1="19" y2="21" />
+        </symbol>
+        <symbol id="i-break" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 2v2" /><path d="M14 2v2" />
+            <path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1" />
+            <path d="M6 2v2" />
         </symbol>
         <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <rect x="4" y="11" width="16" height="10" rx="2" />
@@ -51,6 +71,7 @@
                     <circle class="ring-progress" id="ring-progress" cx="130" cy="130" r="118" />
                 </svg>
                 <div class="ring-center">
+                    <div class="ring-mode" id="ring-mode"></div>
                     <div class="ring-time" id="ring-time">50:00</div>
                     <div class="ring-sub" id="ring-sub">Ready when you are</div>
                 </div>
@@ -60,15 +81,15 @@
 
             <!-- Idle controls -->
             <div class="controls" id="idle-controls">
-                <div class="segmented" id="presets" role="radiogroup" aria-label="Duration">
-                    <button role="radio" data-min="25">25m</button>
-                    <button role="radio" data-min="50">50m</button>
-                    <button role="radio" data-min="90">90m</button>
-                    <button role="radio" data-min="custom">Custom</button>
-                </div>
-                <div class="custom-row" id="custom-row" hidden>
-                    <input type="number" id="custom-minutes" min="1" max="720" inputmode="numeric" placeholder="Minutes">
-                    <span class="muted">minutes</span>
+                <p class="loop-note" id="loop-note" hidden></p>
+                <div class="modes" id="modes" role="radiogroup" aria-label="Lock-in mode"></div>
+                <div class="duration">
+                    <div class="duration-head"><span>Duration</span><span id="duration-value"></span></div>
+                    <div class="duration-track">
+                        <div class="duration-blocks" id="duration-blocks" aria-hidden="true"></div>
+                        <input type="range" class="duration-range" id="duration-range" min="0" step="1" aria-label="Duration">
+                    </div>
+                    <div class="duration-ticks" id="duration-ticks" aria-hidden="true"></div>
                 </div>
                 <input type="text" id="intention" class="field intention-input" maxlength="120" placeholder="What are you working on? (optional)" autocomplete="off">
                 <button class="btn btn-primary btn-lg" id="start-btn">Start focus</button>
@@ -88,31 +109,51 @@
         </section>
 
 
-        <!-- Stats -->
-        <section class="card stats-card">
-            <div class="stats">
-                <div class="stat">
-                    <div class="stat-value" id="stat-today">0m</div>
-                    <div class="stat-label">Focused today</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="stat-sessions">0</div>
-                    <div class="stat-label">Sessions today</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="stat-streak">0</div>
-                    <div class="stat-label">Day streak</div>
-                </div>
-            </div>
-            <div class="week" id="week" aria-label="Focus minutes, last 7 days"></div>
-        </section>
         </div>
 
         <div class="col col-b">
-        <!-- YouTube allowance -->
+        <!-- Today -->
+        <section class="card today-card">
+            <div class="card-head">
+                <h2>Today</h2>
+                <span class="muted" id="today-date"></span>
+            </div>
+            <div class="today-total">
+                <span class="today-hours" id="today-hours">0h</span>
+                <span class="today-target" id="today-target"></span>
+            </div>
+            <div class="today-bar" aria-hidden="true">
+                <div class="seg seg-focus" id="bar-focus"></div>
+            </div>
+            <div class="counters">
+                <div class="counter counter-lecture">
+                    <span class="counter-label"><i class="sw sw-lecture"></i>Lectures</span>
+                    <div class="stepper">
+                        <button type="button" data-kind="lectures" data-step="-1" aria-label="One fewer lecture">−</button>
+                        <span id="lec-count" aria-live="polite">0</span>
+                        <button type="button" data-kind="lectures" data-step="1" aria-label="One more lecture">+</button>
+                    </div>
+                </div>
+                <div class="counter counter-meeting">
+                    <span class="counter-label"><i class="sw sw-meeting"></i>Meetings</span>
+                    <div class="stepper">
+                        <button type="button" data-kind="meetings" data-step="-1" aria-label="One fewer meeting">−</button>
+                        <span id="meet-count" aria-live="polite">0</span>
+                        <button type="button" data-kind="meetings" data-step="1" aria-label="One more meeting">+</button>
+                    </div>
+                </div>
+            </div>
+            <p class="today-extra" id="today-extra"></p>
+            <div class="chart" id="chart" aria-label="Hours per day, last 14 days"></div>
+            <div class="today-foot">
+                <span id="streak"></span>
+                <span id="sessions-today"></span>
+            </div>
+        </section>
+        <!-- Entertainment allowance (YouTube + entertainment list) -->
         <section class="card yt-card" id="yt-card" hidden>
             <div class="card-head">
-                <h2><span class="yt-mark" aria-hidden="true"></span>YouTube</h2>
+                <h2><span class="yt-mark" aria-hidden="true"></span>Entertainment</h2>
                 <span class="muted" id="yt-summary"></span>
             </div>
 
@@ -124,7 +165,7 @@
 
             <div class="yt-connect" id="yt-connect" hidden>
                 <p class="yt-connect-title">Connect the Chrome extension</p>
-                <p class="hint">It counts your time only while you’re watching. YouTube stays blocked until it’s connected.</p>
+                <p class="hint">It counts your time only while you’re watching. YouTube and other entertainment stay blocked until it’s connected.</p>
                 <ol>
                     <li>Open <button type="button" class="copy" data-copy="chrome://extensions">chrome://extensions</button> in a new tab</li>
                     <li>Turn on <strong>Developer mode</strong> (top right)</li>
@@ -143,32 +184,11 @@
                     <div class="meter-bar"><div id="yt-sitting-bar"></div></div>
                 </div>
             </div>
+            <div class="timer-rows" id="timer-rows"></div>
             <p class="hint yt-note" id="yt-note"></p>
         </section>
 
 
-        <!-- Blocklist -->
-        <section class="card blocks-card">
-            <div class="card-head">
-                <h2>Blocklist</h2>
-                <span class="muted" id="site-count"></span>
-            </div>
-
-            <form class="add-form" id="add-form">
-                <input type="text" class="field" id="domain-input" placeholder="Add a site, e.g. instagram.com" autocomplete="off" spellcheck="false" autocapitalize="off">
-                <button type="submit" class="btn btn-primary" aria-label="Add site">
-                    <svg class="btn-icon"><use href="#i-plus" /></svg>Add
-                </button>
-            </form>
-
-            <div class="suggestions" id="suggestions"></div>
-
-            <p class="lock-note" id="list-lock-note" hidden>
-                <svg><use href="#i-lock" /></svg> You can add sites now, but removing them waits until the session ends.
-            </p>
-
-            <ul class="site-list" id="site-list"></ul>
-        </section>
 
         </div>
 
@@ -203,16 +223,32 @@
     </dialog>
 
     <!-- Settings dialog -->
-    <dialog class="modal" id="settings-modal">
+    <dialog class="modal modal-wide" id="settings-modal">
         <form method="dialog" id="settings-form">
             <div class="modal-head">
                 <h3>Settings</h3>
                 <button type="button" class="icon-btn" data-close aria-label="Close"><svg><use href="#i-x" /></svg></button>
             </div>
 
+            <nav class="tabs" id="settings-tabs" role="tablist">
+                <button type="button" role="tab" data-tab="focus">Focus</button>
+                <button type="button" role="tab" data-tab="sites">Sites</button>
+                <button type="button" role="tab" data-tab="youtube">Limits</button>
+                <button type="button" role="tab" data-tab="alerts">Alerts</button>
+            </nav>
+
+            <div class="tab-panel" data-panel="focus">
             <p class="lock-note" id="settings-lock-note" hidden>
                 <svg><use href="#i-lock" /></svg> Settings are locked during a focus session.
             </p>
+
+            <fieldset class="setting" id="target-setting">
+                <legend>Daily target</legend>
+                <label class="yt-edit-row"><span>Study hours a day</span><span class="mins"><input type="number" id="target-hours" min="8" max="16" step="0.5" required> h</span></label>
+                <label class="yt-edit-row"><span>Length of a lecture</span><span class="mins"><input type="number" id="lecture-minutes" min="15" max="240" step="5" required> min</span></label>
+                <label class="yt-edit-row"><span>Length of a meeting</span><span class="mins"><input type="number" id="meeting-minutes" min="5" max="240" step="5" required> min</span></label>
+                <p class="hint">The target is study time from focus sessions, at least 8 hours. Lectures and meetings are tracked on top of it.</p>
+            </fieldset>
 
             <fieldset class="setting" id="early-end-setting">
                 <legend>Ending a session early</legend>
@@ -230,28 +266,94 @@
                 <input type="password" class="field" id="new-password" placeholder="New password (4+ characters)" autocomplete="new-password">
                 <p class="hint">Tip: have a friend set this so you don’t know it.</p>
             </fieldset>
+            </div>
 
+            <div class="tab-panel" data-panel="sites" hidden>
+            <div class="setting-head"><h4>Focus blocklist</h4><span class="muted" id="site-count"></span></div>
+            <p class="hint">Blocked during focus sessions. Use the icons to choose which modes block each site.</p>
+
+            <div class="add-form" id="add-form">
+                <input type="text" class="field" id="domain-input" placeholder="Add a site, e.g. instagram.com" autocomplete="off" spellcheck="false" autocapitalize="off">
+                <button type="button" class="btn btn-primary" aria-label="Add site">
+                    <svg class="btn-icon"><use href="#i-plus" /></svg>Add
+                </button>
+            </div>
+
+            <div class="suggestions" id="suggestions"></div>
+
+            <p class="mode-legend" id="mode-legend"></p>
+
+            <p class="lock-note" id="list-lock-note" hidden>
+                <svg><use href="#i-lock" /></svg> You can add sites now. Removing or unblocking them waits until the session ends.
+            </p>
+
+            <ul class="site-list" id="site-list"></ul>
+
+                <div class="night">
+                    <div class="setting-head"><h4>Entertainment</h4><span class="muted" id="night-status"></span></div>
+                    <p class="hint">Sites with <svg class="inline-icon"><use href="#i-break" /></svg> on share YouTube’s 2-hour budget, sittings and breaks. Every site here is also blocked nightly.</p>
+                    <div class="yt-edit-row">
+                        <label class="check"><input type="checkbox" id="night-enabled"> Block from</label>
+                        <span class="mins"><input type="time" id="night-from" aria-label="Night lock starts"> – <input type="time" id="night-until" aria-label="Night lock ends"></span>
+                    </div>
+                    <div class="add-form" id="night-add-form">
+                        <input type="text" class="field" id="night-domain" placeholder="Add a site, e.g. hulu.com" autocomplete="off" spellcheck="false" autocapitalize="off">
+                        <button type="button" class="btn btn-ghost">Add</button>
+                    </div>
+                    <ul class="site-list" id="night-list"></ul>
+                </div>
+            </div>
+
+            <div class="tab-panel" data-panel="youtube" hidden>
             <fieldset class="setting" id="yt-setting">
-                <legend>YouTube allowance</legend>
-                <label class="check"><input type="checkbox" id="yt-enabled"> Limit how much YouTube I watch</label>
+                <legend>Entertainment allowance</legend>
+                <label class="check"><input type="checkbox" id="yt-enabled"> Limit YouTube and entertainment</label>
                 <div class="yt-edit" id="yt-edit">
                     <label class="yt-edit-row"><span>Daily limit</span><span class="mins"><input type="number" id="yt-daily" min="1" max="720" required> min</span></label>
                     <label class="yt-edit-row"><span>Max in one sitting</span><span class="mins"><input type="number" id="yt-sitting" min="1" max="240" required> min</span></label>
                     <label class="yt-edit-row"><span>Break after a sitting</span><span class="mins"><input type="number" id="yt-break" min="0" max="240" required> min</span></label>
+                    <div class="yt-edit-row"><span>Open hours</span><span class="mins"><input type="time" id="yt-from" required aria-label="Open from"> – <input type="time" id="yt-until" required aria-label="Open until"></span></div>
                 </div>
-                <p class="hint">Time only counts while a YouTube video is playing with sound, or a YouTube tab is in front of you. A sitting resets after a break of that length. Your budget resets at 4am. Changes that give you more time start at the next reset. Changes that give you less start now.</p>
+                <p class="hint">Covers YouTube plus the entertainment list in Sites. Time only counts while a video is playing with sound, or one of those sites is in front of you. A sitting resets after a break of that length. Your budget resets at 4am. Changes that give you more time start at the next reset. Changes that give you less start now.</p>
                 <p class="lock-note" id="yt-pending-note" hidden></p>
             </fieldset>
+            <fieldset class="setting" id="timer-setting">
+                <legend>LinkedIn</legend>
+                <div class="yt-edit-row">
+                    <label class="check"><input type="checkbox" id="li-enabled"> Daily limit</label>
+                    <span class="mins"><input type="number" id="li-minutes" min="1" max="240"> min</span>
+                </div>
+                <p class="hint">Counts only while a LinkedIn tab is in front of you. More time starts at the next 4am reset.</p>
+            </fieldset>
 
+            <fieldset class="setting" id="loop-setting">
+                <legend>Loop breaker</legend>
+                <label class="check"><input type="checkbox" id="loop-enabled"> Block Gmail, Outlook and LinkedIn when I bounce between them</label>
+                <div class="yt-edit-row"><span>Switches that count as a loop</span><span class="mins"><input type="number" id="loop-hops" min="3" max="20"></span></div>
+                <div class="yt-edit-row"><span>…within</span><span class="mins"><input type="number" id="loop-window" min="2" max="60"> min</span></div>
+                <div class="yt-edit-row"><span>Then block them for</span><span class="mins"><input type="number" id="loop-block" min="5" max="120"> min</span></div>
+            </fieldset>
+            </div>
+
+            <div class="tab-panel" data-panel="alerts" hidden>
             <fieldset class="setting">
-                <legend>When focus or YouTube time ends</legend>
+                <legend>When focus or entertainment time ends</legend>
                 <label class="check"><input type="checkbox" id="pref-sound"> Play a chime</label>
                 <label class="check"><input type="checkbox" id="pref-notify"> Show a desktop notification</label>
             </fieldset>
 
+            <fieldset class="setting">
+                <legend>Your data</legend>
+                <p class="hint">Every session and lecture is saved by day. Download it as a spreadsheet.</p>
+                <div class="data-actions">
+                    <a class="btn btn-ghost" href="/api/export.csv" download>Export daily log (CSV)</a>
+                    <button type="button" class="btn btn-ghost btn-text-danger" id="clear-history">Clear history</button>
+                </div>
+            </fieldset>
+            </div>
+
             <p class="error" id="settings-error" hidden></p>
             <div class="modal-actions">
-                <button type="button" class="btn btn-ghost btn-text-danger" id="clear-history">Clear history</button>
                 <button type="submit" class="btn btn-primary" id="settings-save">Save</button>
             </div>
         </form>
