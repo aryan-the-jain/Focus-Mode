@@ -84,6 +84,13 @@
     };
 
     const render = () => {
+        if (status && status.reason === 'pass') {
+            pill.classList.add('show');
+            pill.classList.remove('paused', 'low');
+            const until = new Date(status.pass.activeUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            text.textContent = `${status.pass.dayName} pass · no limits until ${until}`;
+            return;
+        }
         const show = status && status.reason === 'open';
         const low = show && remainingMs <= 5 * 60000;
         const fullscreen = Boolean(document.fullscreenElement);

@@ -141,6 +141,8 @@ const updateBadge = async () => {
     if (!status) {
         text = '!';
         color = '#6b6b6b';
+    } else if (status.reason === 'pass') {
+        text = '∞';
     } else {
         const tab = await frontTab().catch(() => null);
         const host = tab ? hostOf(tab.url) : '';
