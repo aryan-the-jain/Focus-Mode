@@ -6,6 +6,12 @@ It works by adding entries to `/etc/hosts`, so it doesn't depend on a browser ex
 
 ## Features
 
+- **Daily hours.** Study time, lectures and meetings are logged per day, with days starting at 4am. The Today card shows study hours against an 8-hour minimum target, with lecture and meeting counters tracked separately on top, plus a 14-day chart. Settings → Alerts → Export downloads the whole log as CSV.
+- **LinkedIn timer.** 10 minutes a day, counted only while a LinkedIn tab is in front of you and you're at the computer. When it's used up, LinkedIn is blocked until 4am.
+- **Loop breaker.** If you bounce between Gmail, Outlook and LinkedIn (6 switches between any of them, in any order, within 10 minutes), all three are blocked for 30 minutes. The page that replaces them has one-click buttons to start a Scholar or Side Quest session. Change the thresholds in Settings → Limits.
+- **One entertainment budget.** YouTube and the entertainment list (Netflix, Prime Video, chess.com, Reddit, Twitch…) share the same 2 hours a day, 40-minute sittings, 30-minute breaks and 8:00–23:00 hours. Time counts when one of them is the tab in front of you or is playing sound. When the budget says no, they're all blocked together and open tabs are closed. Email stays open, and GitHub is exempt. Use the ☕ toggle per site in Settings → Sites to change what counts.
+- **Night lock.** Netflix, Prime Video, chess.com, GitHub, Twitch, Reddit and similar sites are blocked every night from 22:30 to 06:00, whatever mode you're in. While it's on you can add sites but not remove them or turn it off. Edit the list in Settings → Sites.
+- **Two lock-in modes.** **Scholar** is for uni study and **Side Quest** is for extra study. Each blocklist site can be switched on or off per mode, so coursework sites like Scientia stay open in Scholar but get blocked in Side Quest.
 - **Focus sessions.** 25, 50, or 90 minutes, or any custom length up to 12 hours. Add 15 minutes mid-session if you're on a roll.
 - **Real friction for quitting early.** Choose what it takes to end a session early: type a sentence by hand, enter a password (ideally set by a friend), or nothing at all, because it can't be done.
 - **Blocking that holds.** During a session you can't remove sites from the list or change settings. If `/etc/hosts` is edited by hand, the block is put back within 15 seconds.
@@ -18,7 +24,7 @@ It works by adding entries to `/etc/hosts`, so it doesn't depend on a browser ex
 
 ## YouTube allowance
 
-- **2 hours a day, no more than 40 minutes at a time.** After a full 40-minute sitting, YouTube locks for a 30-minute break.
+- **2 hours a day, no more than 40 minutes at a time, only between 8:00 and 23:00.** After a full 40-minute sitting, YouTube locks for a 30-minute break. Outside those hours it's blocked however much time you have left.
 - **Time only counts while you're watching**, meaning a YouTube video is playing with sound, or a YouTube tab is in front of you. If you pause, switch tabs or leave it in the background, the clock stops. There's nothing to click.
 - **Pausing doesn't reset the sitting.** A sitting only starts over after you've been away for the full break, so short pauses don't earn a fresh sitting.
 - **The budget resets at 4am**, so late nights count toward the day before.
@@ -26,7 +32,7 @@ It works by adding entries to `/etc/hosts`, so it doesn't depend on a browser ex
 - When time runs out, every YouTube tab is replaced with a page that says when YouTube opens again, and YouTube is blocked at the system level.
 - **YouTube only opens while the Chrome extension is connected.** If you turn the extension off or close Chrome, YouTube stays blocked, so switching it off doesn't give you extra time.
 - During a focus session YouTube is always blocked.
-- You can change all three numbers in Settings. Changes that give you more time (a higher limit or a shorter break) wait until the next 4am reset. Changes that give you less apply right away.
+- You can change the limits and the open hours in Settings. Changes that give you more time (a higher limit, a shorter break or longer hours) wait until the next 4am reset. Changes that give you less apply right away.
 
 ### Install the extension (Chrome)
 
