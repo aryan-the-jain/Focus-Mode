@@ -163,6 +163,8 @@
                 <div class="yt-now-sub" id="yt-now-sub"><span class="live-dot"></span><span id="yt-now-text"></span></div>
             </div>
 
+            <div class="pass-row" id="pass-row"></div>
+
             <div class="yt-connect" id="yt-connect" hidden>
                 <p class="yt-connect-title">Connect the Chrome extension</p>
                 <p class="hint">It counts your time only while you’re watching. YouTube and other entertainment stay blocked until it’s connected.</p>
@@ -312,6 +314,9 @@
                     <label class="yt-edit-row"><span>Daily limit</span><span class="mins"><input type="number" id="yt-daily" min="1" max="720" required> min</span></label>
                     <label class="yt-edit-row"><span>Max in one sitting</span><span class="mins"><input type="number" id="yt-sitting" min="1" max="240" required> min</span></label>
                     <label class="yt-edit-row"><span>Break after a sitting</span><span class="mins"><input type="number" id="yt-break" min="0" max="240" required> min</span></label>
+                    <div class="yt-edit-row"><span>Weekly pass day</span><span class="mins"><select id="pass-day" class="select">
+                        <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option>
+                        <option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></span></div>
                     <div class="yt-edit-row"><span>Open hours</span><span class="mins"><input type="time" id="yt-from" required aria-label="Open from"> – <input type="time" id="yt-until" required aria-label="Open until"></span></div>
                 </div>
                 <p class="hint">Covers YouTube plus the entertainment list in Sites. Time only counts while a video is playing with sound, or one of those sites is in front of you. A sitting resets after a break of that length. Your budget resets at 4am. Changes that give you more time start at the next reset. Changes that give you less start now.</p>

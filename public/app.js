@@ -100,6 +100,8 @@
         ytSitting: $('yt-sitting'),
         ytBreak: $('yt-break'),
         ytFrom: $('yt-from'),
+        passRow: $('pass-row'),
+        passDay: $('pass-day'),
         timerRows: $('timer-rows'),
         loopNote: $('loop-note'),
         liEnabled: $('li-enabled'),
@@ -268,9 +270,11 @@
         const ytWatching = mode === 'idle' && yt.reason === 'open' && yt.watching;
         const nightOn = mode === 'idle' && !ytWatching && state.night.active;
         const loopOn = mode === 'idle' && state.loop.active;
-        el.pill.classList.toggle('on', mode !== 'idle' || ytWatching || nightOn || loopOn);
+        const passOn = mode === 'idle' && state.pass.active;
+        el.pill.classList.toggle('on', mode !== 'idle' || ytWatching || nightOn || loopOn || passOn);
         el.pillLabel.textContent = mode === 'session' ? `${profile.name} lock-in`
             : mode === 'block' ? `Blocking · ${profile.name}`
+                : passOn ? `${state.pass.dayName} pass · no limits`
                 : loopOn ? `Loop break until ${formatClock(state.loop.until)}`
                     : ytWatching ? 'Entertainment on'
                         : nightOn ? `Night lock until ${state.night.until}` : 'Idle';
@@ -563,6 +567,42 @@
     const ytElapsed = () => (state.allowance.status.watching ? Date.now() - fetchedAt : 0);
     const ytRemaining = () => Math.max(0, state.allowance.status.remainingMs - ytElapsed());
 
+    // Weekly pass: a button on its day, otherwise a quiet note about the next one.
+    let passConfirm = false;
+    const renderPass = () => {
+        const p = state.pass;
+        const key = p.active ? 'active' : p.available ? `available:${passConfirm}` : `next:${p.usedThisWeek}:${p.nextDate}`;
+        if (el.passRow.dataset.key === key) return;
+        el.passRow.dataset.key = key;
+        el.passRow.innerHTML = '';
+        if (p.active) return;
+        if (p.available) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `pass-btn${passConfirm ? ' confirm' : ''}`;
+            btn.innerHTML = passConfirm
+                ? '<span>Tap again to start</span><small>no undo · once a week</small>'
+                : `<span>Use ${p.dayName} pass</span><small>uncapped until 4am</small>`;
+            btn.addEventListener('click', async () => {
+                if (!passConfirm) {
+                    passConfirm = true;
+                    renderPass();
+                    setTimeout(() => { passConfirm = false; renderPass(); }, 5000);
+                    return;
+                }
+                passConfirm = false;
+                await act('POST', '/api/pass/start', null, `${p.dayName} pass on. Enjoy tonight.`);
+            });
+            el.passRow.appendChild(btn);
+            return;
+        }
+        const next = new Date(p.nextDate).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+        const note = document.createElement('p');
+        note.className = 'pass-note';
+        note.textContent = p.usedThisWeek ? `${p.dayName} pass used this week. Next: ${next}.` : `${p.dayName} pass: uncapped entertainment on ${next}.`;
+        el.passRow.appendChild(note);
+    };
+
     // Daily timers (LinkedIn), shown under the YouTube meters.
     const renderTimers = () => {
         const timers = Object.entries(state.timers).filter(([, t]) => t.enabled);
@@ -632,7 +672,13 @@
                 label = 'Not connected';
                 text = 'Connect the extension below to start watching.';
                 break;
+            case 'pass':
+                label = `${state.pass.dayName} pass`;
+                time = 'No limits';
+                text = `Everything’s open until ${formatClock(state.pass.activeUntil)}. Enjoy it.`;
+                break;
         }
+        el.ytNow.classList.toggle('pass', yt.reason === 'pass');
         el.ytNowLabel.textContent = label;
         el.ytNowTime.textContent = time;
         el.ytNowText.textContent = text;
@@ -661,6 +707,7 @@
         el.extPath.dataset.copy = a.extension.path;
 
         el.ytNote.textContent = a.pending ? 'Your new limits start after the 4am reset.' : '';
+        renderPass();
         renderTimers();
     };
 
@@ -900,6 +947,8 @@
         el.loopHops.value = state.loop.hops;
         el.loopWindow.value = state.loop.windowMinutes;
         el.loopBlock.value = state.loop.blockMinutes;
+        el.passDay.value = String(state.pass.day);
+        el.passDay.disabled = state.pass.active;
         [el.loopEnabled, el.loopHops, el.loopWindow, el.loopBlock].forEach((x) => { x.disabled = state.loop.active; });
         el.nightEnabled.checked = state.night.enabled;
         el.nightFrom.value = state.night.from;
@@ -976,13 +1025,16 @@
         const loopChanged = !lp.active && (loopNext.enabled !== lp.enabled || loopNext.hops !== lp.hops
             || loopNext.windowMinutes !== lp.windowMinutes || loopNext.blockMinutes !== lp.blockMinutes);
 
-        if (!settingsChanged && !ytChanged && !nightChanged && !liChanged && !loopChanged) return el.settingsModal.close();
+        const passChanged = !state.pass.active && Number(el.passDay.value) !== state.pass.day;
+
+        if (!settingsChanged && !ytChanged && !nightChanged && !liChanged && !loopChanged && !passChanged) return el.settingsModal.close();
 
         try {
             if (ytChanged) applyState(await api('PUT', '/api/allowance', ytNext));
             if (nightChanged) applyState(await api('PUT', '/api/night', nightNext));
             if (liChanged) applyState(await api('PUT', '/api/timers/linkedin', liNext));
             if (loopChanged) applyState(await api('PUT', '/api/loop', loopNext));
+            if (passChanged) applyState(await api('PUT', '/api/pass', { day: Number(el.passDay.value) }));
             if (settingsChanged) {
                 // Set the password before switching to password mode.
                 if (body.password && body.earlyEnd === 'password') {

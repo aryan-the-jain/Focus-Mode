@@ -1051,3 +1051,38 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .inline-icon { width: 13px; height: 13px; vertical-align: -2px; }
 .night .site { gap: 8px; }
+
+/* Weekly pass -------------------------------------------------------------- */
+
+.pass-row { margin: -2px 0 14px; }
+.pass-row:empty { display: none; }
+
+.pass-btn {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px dashed var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.15s;
+}
+
+.pass-btn:hover { background: var(--accent-soft); }
+.pass-btn.confirm { border-style: solid; background: var(--text); color: var(--bg); }
+.pass-btn small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.pass-btn.confirm small { color: inherit; opacity: 0.7; }
+.pass-note { font-size: 12.5px; color: var(--muted); }
+
+.yt-now.pass { background: var(--text); color: var(--bg); }
+.yt-now.pass .yt-now-label, .yt-now.pass .yt-now-sub { color: var(--bg); opacity: 0.75; }
+
+.select {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 8px;
+    font-size: 13px;
+}
