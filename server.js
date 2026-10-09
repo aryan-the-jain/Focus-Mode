@@ -19,6 +19,20 @@ const EARLY_END_PHRASE = 'I choose to end this session early';
 const MAX_SESSION_MINUTES = 12 * 60;
 const ENFORCE_EVERY_MS = 15 * 1000;
 
+// Lock-in modes. Each blocklist site can be switched off per mode, e.g.
+// coursework sites stay open in Scholar but are blocked in Side Quest.
+const PROFILES = [
+    { id: 'scholar', name: 'Scholar', blurb: 'Uni study' },
+    { id: 'sidequest', name: 'Side Quest', blurb: 'Extra study' },
+];
+const PROFILE_IDS = PROFILES.map((p) => p.id);
+
+// Night lock: entertainment that's blocked every night, whatever the mode.
+const DEFAULT_NIGHT_SITES = [
+    'netflix.com', 'primevideo.com', 'chess.com', 'github.com',
+    'twitch.tv', 'reddit.com', 'x.com', 'instagram.com', 'tiktok.com', 'disneyplus.com',
+];
+
 const DEFAULT_SITES = ['youtube.com', 'reddit.com', 'whatsapp.com', 'gmail.com', 'outlook.com', 'linkedin.com'];
 
 // Extra hostnames a site depends on. /etc/hosts has no wildcards, so these
@@ -37,13 +51,16 @@ const RELATED_DOMAINS = {
     'netflix.com': ['assets.nflxext.com'],
     'twitch.tv': ['clips.twitch.tv'],
     'discord.com': ['discord.gg', 'discordapp.com', 'www.discordapp.com'],
+    'primevideo.com': ['app.primevideo.com'],
+    'github.com': ['gist.github.com'],
+    'chess.com': ['lichess.org', 'www.lichess.org'],
 };
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-// YouTube allowance: a daily budget, watched at most one sitting at a time.
+// YouTube allowance: a daily budget within set hours, watched at most one sitting at a time.
 // The Chrome extension reports when you're actually watching; only that time
 // counts. After a full sitting YouTube locks for a break.
 const defaultAllowance = () => ({
@@ -52,6 +69,8 @@ const defaultAllowance = () => ({
     dailyMinutes: 120,
     sittingMinutes: 40,
     breakMinutes: 30,
+    openFrom: '08:00', // YouTube is blocked outside these hours
+    openUntil: '23:00',
     usage: {}, // { 'YYYY-MM-DD': ms watched }
     sitting: { usedMs: 0, lastWatchedAt: 0 },
     cooldownUntil: 0,
@@ -63,8 +82,37 @@ const defaultState = () => ({
     session: null, // { startedAt, endsAt, plannedMinutes, intention }
     blockStartedAt: null,
     sites: [...DEFAULT_SITES],
-    settings: { earlyEnd: 'phrase', passwordHash: null, passwordSalt: null },
-    history: [], // { startedAt, endedAt, plannedMinutes, intention, completed }
+    siteProfiles: {}, // domain -> profile ids it's blocked in (absent = all)
+    blockProfile: null,
+    settings: {
+        earlyEnd: 'phrase',
+        passwordHash: null,
+        passwordSalt: null,
+        dailyTargetMinutes: 480, // study time only
+        lectureMinutes: 60,
+        meetingMinutes: 60,
+    },
+    history: [], // { startedAt, endedAt, plannedMinutes, intention, profile, completed }
+    days: {}, // 'YYYY-MM-DD' (4am-based) -> { lectures, meetings }
+    // Entertainment list: blocked every night, and during YouTube breaks (except breakExempt).
+    night: { enabled: true, from: '22:30', until: '06:00', sites: [...DEFAULT_NIGHT_SITES], breakExempt: ['github.com'] },
+    // Daily timers for sites metered by the extension (time the tab is in front of you).
+    timers: { linkedin: { label: 'LinkedIn', domain: 'linkedin.com', dailyMinutes: 10, enabled: true, pending: null } },
+    timerUsage: {}, // 'YYYY-MM-DD' -> { timerId: ms }
+    // Loop breaker: bouncing between inbox-type sites blocks them for a while.
+    loop: {
+        enabled: true,
+        hops: 6, // switches between these apps...
+        windowMinutes: 10, // ...within this many minutes
+        blockMinutes: 30,
+        until: 0,
+        apps: {
+            gmail: ['mail.google.com', 'gmail.com'],
+            outlook: ['outlook.com', 'outlook.live.com', 'outlook.office.com', 'outlook.office365.com'],
+            linkedin: ['linkedin.com'],
+        },
+        blockSites: ['gmail.com', 'outlook.com', 'linkedin.com'],
+    },
     allowance: defaultAllowance(),
 });
 
@@ -79,6 +127,9 @@ const loadState = () => {
             ...saved,
             settings: { ...defaults.settings, ...saved.settings },
             allowance: { ...defaults.allowance, ...saved.allowance },
+            night: { ...defaults.night, ...saved.night },
+            timers: { ...defaults.timers, ...saved.timers },
+            loop: { ...defaults.loop, ...saved.loop, apps: defaults.loop.apps, blockSites: defaults.loop.blockSites },
         };
         // Older versions tracked usage per meal slot.
         const a = state.allowance;
@@ -134,12 +185,27 @@ const expandSite = (domain) => {
     return [...hosts];
 };
 
+const siteProfiles = (domain) => state.siteProfiles[domain] || PROFILE_IDS;
+const blockedIn = (domain, profile) => siteProfiles(domain).includes(profile);
+const activeProfile = () => {
+    if (state.mode === 'session') return state.session.profile || PROFILE_IDS[0];
+    if (state.mode === 'block') return state.blockProfile || PROFILE_IDS[0];
+    return null;
+};
+const parseProfile = (id) => (PROFILE_IDS.includes(id) ? id : PROFILE_IDS[0]);
+
 // Sites that should be blocked right now: the blocklist during focus/blocking,
 // plus YouTube whenever the allowance doesn't permit it.
 const blockedSites = () => {
     const sites = new Set();
-    if (state.mode !== 'idle') state.sites.forEach((d) => sites.add(d));
+    const profile = activeProfile();
+    if (state.mode !== 'idle') state.sites.filter((d) => blockedIn(d, profile)).forEach((d) => sites.add(d));
     if (!youtubeAccess().allowed) state.allowance.sites.forEach((d) => sites.add(d));
+    entertainmentBlocked().forEach((d) => sites.add(d));
+    Object.keys(state.timers).forEach((id) => {
+        if (!timerAllowed(id)) sites.add(state.timers[id].domain);
+    });
+    if (loopActive()) state.loop.blockSites.forEach((d) => sites.add(d));
     return [...sites];
 };
 
@@ -214,6 +280,25 @@ const dayKey = (ts = Date.now()) => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Timestamp for HH:MM on the same calendar day as ts.
+const atTime = (hhmm, ts = Date.now()) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    const d = new Date(ts);
+    d.setHours(h, m, 0, 0);
+    return d.getTime();
+};
+
+// When YouTube's open hours start and end around `now`.
+const openWindow = (now = Date.now()) => {
+    const { openFrom, openUntil } = state.allowance;
+    const start = atTime(openFrom, now);
+    const end = atTime(openUntil, now);
+    const isOpen = now >= start && now < end;
+    let opensAt = start;
+    if (now >= end) opensAt = atTime(openFrom, now + 24 * 60 * 60 * 1000);
+    return { isOpen, opensAt, closesAt: end };
+};
+
 // Next 4am, when today's budget resets.
 const nextDayStart = (ts = Date.now()) => {
     const d = new Date(ts);
@@ -277,6 +362,7 @@ const youtubeAccess = (now = Date.now()) => {
     if (!a.enabled) return { allowed: true, reason: 'unlimited' };
     if (state.mode === 'session') return { allowed: false, reason: 'focus' };
     if (state.mode === 'block') return { allowed: false, reason: 'block' };
+    if (!openWindow(now).isOpen) return { allowed: false, reason: 'hours' };
     if (dailyUsedMs(now) >= a.dailyMinutes * 60000) return { allowed: false, reason: 'daily' };
     if (now < a.cooldownUntil || sittingUsedMs(now) >= a.sittingMinutes * 60000) return { allowed: false, reason: 'cooldown' };
     if (!extensionConnected(now)) return { allowed: false, reason: 'extension' };
@@ -290,11 +376,12 @@ const youtubeStatus = (now = Date.now()) => {
     const sittingMs = a.sittingMinutes * 60000;
     const daily = dailyUsedMs(now);
     const sitting = sittingUsedMs(now);
+    const hours = openWindow(now);
     let cooldownUntil = null;
     if (access.reason === 'cooldown') cooldownUntil = now < a.cooldownUntil ? a.cooldownUntil : now + a.breakMinutes * 60000;
     return {
         ...access,
-        remainingMs: Math.max(0, Math.min(dailyMs - daily, sittingMs - sitting)),
+        remainingMs: Math.max(0, Math.min(dailyMs - daily, sittingMs - sitting, hours.closesAt - now)),
         dailyUsedMs: daily,
         dailyMs,
         sittingUsedMs: sitting,
@@ -302,6 +389,10 @@ const youtubeStatus = (now = Date.now()) => {
         breakMs: a.breakMinutes * 60000,
         cooldownUntil,
         resetsAt: nextDayStart(now),
+        opensAt: hours.isOpen ? null : hours.opensAt,
+        closesAt: hours.closesAt,
+        openFrom: a.openFrom,
+        openUntil: a.openUntil,
         watching: monitor.watching && access.allowed,
         focusEndsAt: state.mode === 'session' ? state.session.endsAt : null,
         now,
@@ -317,6 +408,8 @@ const pruneUsage = () => {
 
 const LIMITS = { dailyMinutes: [1, 720], sittingMinutes: [1, 240], breakMinutes: [0, 240] };
 
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 const validateLimits = (body, current) => {
     const out = {};
     for (const [key, [min, max]] of Object.entries(LIMITS)) {
@@ -324,8 +417,15 @@ const validateLimits = (body, current) => {
         if (!Number.isFinite(v) || v < min || v > max) return null;
         out[key] = v;
     }
+    for (const key of ['openFrom', 'openUntil']) {
+        const v = body[key] === undefined ? current[key] : body[key];
+        if (!TIME_RE.test(v)) return null;
+        out[key] = v;
+    }
+    if (out.openFrom >= out.openUntil) return null;
     return out;
 };
+
 
 // A change that only ever gives you less YouTube can apply immediately.
 const isTightening = (oldA, next) => {
@@ -333,7 +433,9 @@ const isTightening = (oldA, next) => {
     if (!next.enabled) return false;
     return next.dailyMinutes <= oldA.dailyMinutes
         && next.sittingMinutes <= oldA.sittingMinutes
-        && next.breakMinutes >= oldA.breakMinutes;
+        && next.breakMinutes >= oldA.breakMinutes
+        && next.openFrom >= oldA.openFrom
+        && next.openUntil <= oldA.openUntil;
 };
 
 const applyAllowanceConfig = (next) => {
@@ -343,7 +445,167 @@ const applyAllowanceConfig = (next) => {
     a.dailyMinutes = next.dailyMinutes;
     a.sittingMinutes = next.sittingMinutes;
     a.breakMinutes = next.breakMinutes;
+    a.openFrom = next.openFrom;
+    a.openUntil = next.openUntil;
     a.pending = null;
+};
+
+// ---------------------------------------------------------------------------
+// Daily timers (LinkedIn) and the loop breaker
+// ---------------------------------------------------------------------------
+
+const timerMonitor = {}; // timerId -> { active, since }
+
+const timerLiveMs = (id, now = Date.now()) => {
+    const m = timerMonitor[id];
+    if (!m || !m.active || !m.since) return 0;
+    return Math.max(0, Math.min(now, monitor.lastSeenAt + ACCRUE_GRACE_MS) - m.since);
+};
+
+const timerUsedMs = (id, now = Date.now()) => {
+    const t = state.timers[id];
+    const stored = (state.timerUsage[dayKey(now)] || {})[id] || 0;
+    return Math.min(stored + timerLiveMs(id, now), t.dailyMinutes * 60000);
+};
+
+const timerAllowed = (id, now = Date.now()) => {
+    const t = state.timers[id];
+    if (!t.enabled) return true;
+    return extensionConnected(now) && timerUsedMs(id, now) < t.dailyMinutes * 60000;
+};
+
+const accrueTimers = (now = Date.now()) => {
+    const end = Math.min(now, monitor.lastSeenAt + ACCRUE_GRACE_MS);
+    Object.entries(timerMonitor).forEach(([id, m]) => {
+        if (!m.active || !m.since || !state.timers[id]) return;
+        const day = dayKey(m.since);
+        state.timerUsage[day] = state.timerUsage[day] || {};
+        const cap = state.timers[id].dailyMinutes * 60000;
+        state.timerUsage[day][id] = Math.min((state.timerUsage[day][id] || 0) + Math.max(0, end - m.since), cap);
+        if (end < now) timerMonitor[id] = { active: false, since: null };
+        else m.since = now;
+    });
+};
+
+const timerStatus = (now = Date.now()) => Object.fromEntries(Object.entries(state.timers).map(([id, t]) => {
+    const usedMs = timerUsedMs(id, now);
+    const dailyMs = t.dailyMinutes * 60000;
+    return [id, {
+        label: t.label,
+        domain: t.domain,
+        enabled: t.enabled,
+        allowed: timerAllowed(id, now),
+        usedMs,
+        dailyMs,
+        remainingMs: Math.max(0, dailyMs - usedMs),
+        active: Boolean(timerMonitor[id] && timerMonitor[id].active),
+        pending: t.pending,
+    }];
+}));
+
+const loopActive = (now = Date.now()) => state.loop.enabled && now < state.loop.until;
+
+const loopStatus = (now = Date.now()) => {
+    const { enabled, hops, windowMinutes, blockMinutes, until, apps } = state.loop;
+    return { enabled, hops, windowMinutes, blockMinutes, active: loopActive(now), until: loopActive(now) ? until : null, apps };
+};
+
+// Everything the extension needs to meter and enforce.
+const extensionStatus = (now = Date.now()) => ({
+    ...youtubeStatus(now),
+    timers: timerStatus(now),
+    loop: loopStatus(now),
+    entertainment: {
+        reason: nightActive(now) ? 'night' : entertainmentBlocked(now).length ? youtubeAccess(now).reason : null,
+        sites: entertainmentBlocked(now),
+        metered: state.allowance.enabled ? meteredEntertainment() : [],
+        nightUntil: state.night.until,
+    },
+});
+
+// ---------------------------------------------------------------------------
+// Night lock
+// ---------------------------------------------------------------------------
+
+const minutesOfDay = (ts) => {
+    const d = new Date(ts);
+    return d.getHours() * 60 + d.getMinutes();
+};
+const toMinutes = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+};
+
+// The window can cross midnight (22:30 -> 06:00).
+const nightActive = (now = Date.now()) => {
+    const { enabled, from, until } = state.night;
+    if (!enabled) return false;
+    const t = minutesOfDay(now);
+    const a = toMinutes(from);
+    const b = toMinutes(until);
+    return a <= b ? t >= a && t < b : t >= a || t < b;
+};
+
+// The YouTube allowance is really an entertainment allowance: time on any
+// entertainment site (except exempt ones like GitHub) comes out of the same daily
+// budget and sittings, and they're all blocked together when it says no.
+const youtubeBreak = (now = Date.now()) => youtubeAccess(now).reason === 'cooldown';
+
+const meteredEntertainment = () => state.night.sites.filter((d) => !state.night.breakExempt.includes(d));
+
+const entertainmentBlocked = (now = Date.now()) => {
+    if (nightActive(now)) return state.night.sites;
+    if (state.allowance.enabled && !youtubeAccess(now).allowed) return meteredEntertainment();
+    return [];
+};
+
+// ---------------------------------------------------------------------------
+// Daily log
+// ---------------------------------------------------------------------------
+
+// Study time, lectures and meetings per day (days start at 4am, like the YouTube
+// budget). The target is study time only; lectures and meetings are tracked beside it.
+const dailyLog = (count = 30, now = Date.now()) => {
+    const focus = {};
+    state.history.forEach((h) => {
+        const k = dayKey(h.startedAt);
+        focus[k] = (focus[k] || 0) + Math.max(0, h.endedAt - h.startedAt);
+    });
+    if (state.mode === 'session') {
+        const k = dayKey(state.session.startedAt);
+        focus[k] = (focus[k] || 0) + Math.max(0, Math.min(now, state.session.endsAt) - state.session.startedAt);
+    }
+    const lectureMs = state.settings.lectureMinutes * 60000;
+    const meetingMs = state.settings.meetingMinutes * 60000;
+    const targetMs = state.settings.dailyTargetMinutes * 60000;
+    const out = [];
+    for (let i = count - 1; i >= 0; i--) {
+        const ts = now - i * 24 * 60 * 60 * 1000;
+        const day = dayKey(ts);
+        const { lectures = 0, meetings = 0 } = state.days[day] || {};
+        const focusMs = focus[day] || 0;
+        out.push({
+            day,
+            ts,
+            focusMs,
+            lectures,
+            lectureMs: lectures * lectureMs,
+            meetings,
+            meetingMs: meetings * meetingMs,
+            totalMs: focusMs + lectures * lectureMs + meetings * meetingMs,
+            met: focusMs >= targetMs,
+        });
+    }
+    return out;
+};
+
+const targetStreak = (log) => {
+    let streak = 0;
+    for (let i = log.length - 1; i >= 0; i--) {
+        if (log[i].met) streak++;
+        else if (i !== log.length - 1) break; // today not done yet doesn't break it
+    }
+    return streak;
 };
 
 // ---------------------------------------------------------------------------
@@ -358,6 +620,7 @@ const finishSession = (completed) => {
         endedAt: completed ? session.endsAt : Date.now(),
         plannedMinutes: session.plannedMinutes,
         intention: session.intention,
+        profile: session.profile,
         completed,
     });
     state.mode = 'idle';
@@ -369,6 +632,7 @@ const finishSession = (completed) => {
 
 let lastEnforced = 0;
 let lastYoutubeAllowed = null;
+let lastLimitsKey = null;
 const tick = () => {
     if (state.mode === 'session' && Date.now() >= state.session.endsAt) {
         finishSession(true);
@@ -378,6 +642,22 @@ const tick = () => {
     // Block or unblock YouTube the moment access changes (sitting or daily
     // limit reached, break over, extension disconnects).
     const access = youtubeAccess();
+    // Same for LinkedIn's timer and the loop breaker.
+    const limitsKey = JSON.stringify([Object.keys(state.timers).map((id) => timerAllowed(id)), loopActive()]);
+    if (limitsKey !== lastLimitsKey) {
+        lastLimitsKey = limitsKey;
+        accrueTimers();
+        saveState();
+        syncHosts();
+    }
+    Object.entries(state.timers).forEach(([id, t]) => {
+        if (t.pending && dayKey() >= t.pending.effectiveDay) {
+            accrueTimers();
+            state.timers[id] = { ...t, dailyMinutes: t.pending.dailyMinutes, enabled: t.pending.enabled, pending: null };
+            saveState();
+            syncHosts();
+        }
+    });
     if (access.allowed !== lastYoutubeAllowed) {
         lastYoutubeAllowed = access.allowed;
         accrue();
@@ -428,7 +708,8 @@ app.use((req, res, next) => {
     const host = req.headers.host;
     if (!allowedHosts.has(host)) return res.status(403).send('Forbidden');
     const origin = req.headers.origin;
-    const fromExtension = origin && origin.startsWith('chrome-extension://') && req.path.startsWith('/api/youtube/');
+    const fromExtension = origin && origin.startsWith('chrome-extension://')
+        && (req.path.startsWith('/api/youtube/') || req.path.startsWith('/api/ext/'));
     if (req.method !== 'GET' && origin && origin !== `http://${host}` && !fromExtension) {
         return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
     }
@@ -440,17 +721,42 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const publicState = () => {
     const since = Date.now() - 60 * 24 * 60 * 60 * 1000;
+    const log = dailyLog(30);
     return {
         mode: state.mode,
         session: state.session,
         blockStartedAt: state.blockStartedAt,
-        sites: state.sites.map((domain) => ({ domain, hosts: expandSite(domain) })),
+        sites: state.sites.map((domain) => ({ domain, hosts: expandSite(domain), profiles: siteProfiles(domain) })),
+        profiles: PROFILES,
+        activeProfile: activeProfile(),
         settings: {
             earlyEnd: state.settings.earlyEnd,
             hasPassword: Boolean(state.settings.passwordHash),
             phrase: EARLY_END_PHRASE,
         },
         history: state.history.filter((h) => h.endedAt >= since),
+        today: dayKey(),
+        days: log,
+        streak: targetStreak(log),
+        target: {
+            dailyMinutes: state.settings.dailyTargetMinutes,
+            lectureMinutes: state.settings.lectureMinutes,
+            meetingMinutes: state.settings.meetingMinutes,
+        },
+        timers: timerStatus(),
+        loop: loopStatus(),
+        night: {
+            enabled: state.night.enabled,
+            from: state.night.from,
+            until: state.night.until,
+            active: nightActive(),
+            breakActive: youtubeBreak(),
+            sites: state.night.sites.map((domain) => ({
+                domain,
+                hosts: expandSite(domain),
+                duringBreaks: !state.night.breakExempt.includes(domain),
+            })),
+        },
         allowance: publicAllowance(),
         now: Date.now(),
     };
@@ -464,6 +770,8 @@ const publicAllowance = () => {
         dailyMinutes: a.dailyMinutes,
         sittingMinutes: a.sittingMinutes,
         breakMinutes: a.breakMinutes,
+        openFrom: a.openFrom,
+        openUntil: a.openUntil,
         pending: a.pending,
         status: youtubeStatus(),
         extension: { connected: extensionConnected(), path: path.join(__dirname, 'extension') },
@@ -486,7 +794,7 @@ const withHosts = (res, fn) => {
 
 app.get('/api/state', (req, res) => res.json(publicState()));
 
-app.post('/api/session/start', (req, res) => {
+const startSession = (req, res) => {
     if (state.mode === 'session') return fail(res, 409, 'A focus session is already running.');
     const minutes = Math.round(Number(req.body.minutes));
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_SESSION_MINUTES) {
@@ -500,9 +808,11 @@ app.post('/api/session/start', (req, res) => {
         accrue();
         state.mode = 'session';
         state.blockStartedAt = null;
-        state.session = { startedAt: now, endsAt: now + minutes * 60 * 1000, plannedMinutes: minutes, intention };
+        state.session = { startedAt: now, endsAt: now + minutes * 60 * 1000, plannedMinutes: minutes, intention, profile: parseProfile(req.body.profile) };
     });
-});
+};
+
+app.post('/api/session/start', startSession);
 
 app.post('/api/session/extend', (req, res) => {
     if (state.mode !== 'session') return fail(res, 409, 'No focus session is running.');
@@ -539,6 +849,7 @@ app.post('/api/block/start', (req, res) => {
         accrue();
         state.mode = 'block';
         state.blockStartedAt = Date.now();
+        state.blockProfile = parseProfile(req.body && req.body.profile);
     });
 });
 
@@ -559,19 +870,53 @@ app.post('/api/sites', (req, res) => {
     });
 });
 
+app.put('/api/sites/:domain', (req, res) => {
+    const domain = String(req.params.domain).toLowerCase();
+    if (!state.sites.includes(domain)) return fail(res, 404, 'That site isn’t on your list.');
+    const profiles = req.body.profiles;
+    if (!Array.isArray(profiles) || profiles.length === 0 || profiles.some((p) => !PROFILE_IDS.includes(p))) {
+        return fail(res, 400, 'Pick at least one mode to block it in, or remove the site.');
+    }
+    const active = activeProfile();
+    if (state.mode === 'session' && blockedIn(domain, active) && !profiles.includes(active)) {
+        return fail(res, 423, 'You can’t unblock a site in the mode you’re focusing in.');
+    }
+    withHosts(res, () => {
+        if (profiles.length === PROFILE_IDS.length) delete state.siteProfiles[domain];
+        else state.siteProfiles[domain] = PROFILE_IDS.filter((p) => profiles.includes(p));
+    });
+});
+
 app.delete('/api/sites/:domain', (req, res) => {
     const domain = String(req.params.domain).toLowerCase();
     if (!state.sites.includes(domain)) return fail(res, 404, 'That site isn’t on your list.');
     if (state.mode === 'session') return fail(res, 423, 'Sites can’t be removed during a focus session.');
     withHosts(res, () => {
         state.sites = state.sites.filter((d) => d !== domain);
+        delete state.siteProfiles[domain];
     });
 });
 
 app.put('/api/settings', (req, res) => {
     if (state.mode === 'session') return fail(res, 423, 'Settings are locked during a focus session.');
-    const { earlyEnd, password, currentPassword } = req.body;
+    const { earlyEnd, password, currentPassword, dailyTargetMinutes, lectureMinutes, meetingMinutes } = req.body;
     const settings = state.settings;
+
+    if (dailyTargetMinutes !== undefined) {
+        const v = Math.round(Number(dailyTargetMinutes));
+        if (!Number.isFinite(v) || v < 480 || v > 960) return fail(res, 400, 'Daily target must be between 8 and 16 hours.');
+        settings.dailyTargetMinutes = v;
+    }
+    if (lectureMinutes !== undefined) {
+        const v = Math.round(Number(lectureMinutes));
+        if (!Number.isFinite(v) || v < 15 || v > 240) return fail(res, 400, 'Lecture length must be 15–240 minutes.');
+        settings.lectureMinutes = v;
+    }
+    if (meetingMinutes !== undefined) {
+        const v = Math.round(Number(meetingMinutes));
+        if (!Number.isFinite(v) || v < 5 || v > 240) return fail(res, 400, 'Meeting length must be 5–240 minutes.');
+        settings.meetingMinutes = v;
+    }
 
     if (password !== undefined || (earlyEnd && earlyEnd !== settings.earlyEnd && settings.earlyEnd === 'password')) {
         if (settings.passwordHash && !checkPassword(currentPassword)) return fail(res, 401, 'Current password is incorrect.');
@@ -598,7 +943,14 @@ app.put('/api/settings', (req, res) => {
 app.post('/api/youtube/heartbeat', (req, res) => {
     const now = Date.now();
     accrue(now);
+    accrueTimers(now);
     monitor.lastSeenAt = now;
+    const active = req.body.active || {};
+    Object.keys(state.timers).forEach((id) => {
+        const on = active[id] === true && timerAllowed(id, now);
+        const m = timerMonitor[id] || { active: false, since: null };
+        timerMonitor[id] = on ? { active: true, since: m.active ? m.since : now } : { active: false, since: null };
+    });
     const access = youtubeAccess(now);
     const watching = req.body.watching === true && access.allowed && access.reason === 'open';
     if (watching && !monitor.watching) {
@@ -614,17 +966,63 @@ app.post('/api/youtube/heartbeat', (req, res) => {
         lastYoutubeAllowed = access.allowed;
         syncHosts();
     }
-    res.json(youtubeStatus(now));
+    res.json(extensionStatus(now));
 });
 
-app.get('/api/youtube/status', (req, res) => res.json(youtubeStatus()));
+app.get('/api/youtube/status', (req, res) => res.json(extensionStatus()));
+
+// The extension saw you bouncing between Gmail, Outlook and LinkedIn.
+app.post('/api/ext/loop', (req, res) => {
+    const now = Date.now();
+    if (state.loop.enabled && state.mode === 'idle' && !loopActive(now)) {
+        state.loop.until = now + state.loop.blockMinutes * 60000;
+        console.log(`Loop detected (${(req.body.apps || []).join(' → ')}). Inbox sites blocked for ${state.loop.blockMinutes} min.`);
+        saveState();
+        syncHosts();
+    }
+    res.json(extensionStatus(now));
+});
+
+// Start a session straight from the extension's "get to work" page.
+app.post('/api/ext/session', startSession);
+
+app.put('/api/timers/:id', (req, res) => {
+    const t = state.timers[req.params.id];
+    if (!t) return fail(res, 404, 'Unknown timer.');
+    if (state.mode === 'session') return fail(res, 423, 'Settings are locked during a focus session.');
+    const dailyMinutes = req.body.dailyMinutes === undefined ? t.dailyMinutes : Math.round(Number(req.body.dailyMinutes));
+    const enabled = req.body.enabled === undefined ? t.enabled : Boolean(req.body.enabled);
+    if (!Number.isFinite(dailyMinutes) || dailyMinutes < 1 || dailyMinutes > 240) return fail(res, 400, 'Daily limit must be 1–240 minutes.');
+    // More time waits for the next 4am reset, like the YouTube limits.
+    const loosening = (t.enabled && !enabled) || dailyMinutes > t.dailyMinutes;
+    withHosts(res, () => {
+        accrueTimers();
+        if (loosening) t.pending = { dailyMinutes, enabled, effectiveDay: dayKey(nextDayStart()) };
+        else Object.assign(t, { dailyMinutes, enabled, pending: null });
+    });
+});
+
+app.put('/api/loop', (req, res) => {
+    if (loopActive()) return fail(res, 423, 'The loop breaker is on. Get some work done first.');
+    const next = { ...state.loop };
+    if (req.body.enabled !== undefined) next.enabled = Boolean(req.body.enabled);
+    for (const [key, min, max] of [['hops', 3, 20], ['windowMinutes', 2, 60], ['blockMinutes', 5, 120]]) {
+        if (req.body[key] === undefined) continue;
+        const v = Math.round(Number(req.body[key]));
+        if (!Number.isFinite(v) || v < min || v > max) return fail(res, 400, `${key} must be ${min}–${max}.`);
+        next[key] = v;
+    }
+    state.loop = next;
+    saveState();
+    res.json(publicState());
+});
 
 app.put('/api/allowance', (req, res) => {
     if (state.mode === 'session') return fail(res, 423, 'Settings are locked during a focus session.');
     const a = state.allowance;
     const enabled = req.body.enabled === undefined ? a.enabled : Boolean(req.body.enabled);
     const limits = validateLimits(req.body, a);
-    if (!limits) return fail(res, 400, 'Daily limit 1–720 min, sitting 1–240 min, break 0–240 min.');
+    if (!limits) return fail(res, 400, 'Daily limit 1–720 min, sitting 1–240 min, break 0–240 min, and open hours must start before they end.');
     if (limits.sittingMinutes > limits.dailyMinutes) return fail(res, 400, 'A sitting can’t be longer than the daily limit.');
 
     const next = { enabled, ...limits };
@@ -636,6 +1034,97 @@ app.put('/api/allowance', (req, res) => {
             a.pending = { ...next, effectiveDay: dayKey(nextDayStart()) };
         }
     });
+});
+
+// Lecture and meeting counts for today, or a past day (for backfilling).
+app.put('/api/day', (req, res) => {
+    const today = dayKey();
+    const day = req.body.day === undefined ? today : String(req.body.day);
+    const oldest = dayKey(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day > today || day < oldest) {
+        return fail(res, 400, 'You can only edit today or the last 60 days.');
+    }
+    const next = { ...state.days[day] };
+    for (const key of ['lectures', 'meetings']) {
+        if (req.body[key] === undefined) continue;
+        const count = Math.round(Number(req.body[key]));
+        if (!Number.isFinite(count) || count < 0 || count > 12) return fail(res, 400, 'Counts must be between 0 and 12.');
+        next[key] = count;
+    }
+    state.days[day] = next;
+    saveState();
+    res.json(publicState());
+});
+
+// Night lock can't be loosened while it's on.
+const nightLocked = (res) => {
+    if (!nightActive()) return false;
+    fail(res, 423, `Night lock is on until ${state.night.until}.`);
+    return true;
+};
+
+app.post('/api/night/sites', (req, res) => {
+    const domain = normalizeDomain(req.body.domain);
+    if (!domain) return fail(res, 400, 'That doesn’t look like a valid website.');
+    if (state.night.sites.includes(domain)) return fail(res, 409, `${domain} is already on the night list.`);
+    withHosts(res, () => state.night.sites.push(domain));
+});
+
+app.delete('/api/night/sites/:domain', (req, res) => {
+    const domain = String(req.params.domain).toLowerCase();
+    if (!state.night.sites.includes(domain)) return fail(res, 404, 'That site isn’t on the night list.');
+    if (nightLocked(res)) return;
+    withHosts(res, () => {
+        state.night.sites = state.night.sites.filter((d) => d !== domain);
+        state.night.breakExempt = state.night.breakExempt.filter((d) => d !== domain);
+    });
+});
+
+// Whether a site on the entertainment list is also blocked during YouTube breaks.
+app.put('/api/night/sites/:domain', (req, res) => {
+    const domain = String(req.params.domain).toLowerCase();
+    if (!state.night.sites.includes(domain)) return fail(res, 404, 'That site isn’t on the list.');
+    const during = Boolean(req.body.duringBreaks);
+    if (!during && state.allowance.enabled && !youtubeAccess().allowed) {
+        return fail(res, 423, 'Entertainment is blocked right now. Change this when it’s open again.');
+    }
+    withHosts(res, () => {
+        state.night.breakExempt = state.night.breakExempt.filter((d) => d !== domain);
+        if (!during) state.night.breakExempt.push(domain);
+    });
+});
+
+app.put('/api/night', (req, res) => {
+    if (nightLocked(res)) return;
+    const next = { ...state.night };
+    if (req.body.enabled !== undefined) next.enabled = Boolean(req.body.enabled);
+    for (const key of ['from', 'until']) {
+        if (req.body[key] === undefined) continue;
+        if (!TIME_RE.test(req.body[key])) return fail(res, 400, 'Times must be HH:MM.');
+        next[key] = req.body[key];
+    }
+    if (next.from === next.until) return fail(res, 400, 'Start and end can’t be the same.');
+    withHosts(res, () => { state.night = next; });
+});
+
+// Daily log as CSV, for keeping your own records.
+app.get('/api/export.csv', (req, res) => {
+    const first = state.history.length ? Math.min(...state.history.map((h) => h.startedAt)) : Date.now();
+    const lectureDays = Object.keys(state.days).sort();
+    const firstLecture = lectureDays.length ? new Date(`${lectureDays[0]}T12:00:00`).getTime() : Date.now();
+    const span = Math.ceil((Date.now() - Math.min(first, firstLecture)) / 86400000) + 1;
+    const rows = dailyLog(span).map((d) => [
+        d.day,
+        Math.round(d.focusMs / 60000),
+        d.lectures,
+        Math.round(d.lectureMs / 60000),
+        d.meetings,
+        Math.round(d.meetingMs / 60000),
+        Math.round(d.totalMs / 60000),
+        d.met ? 'yes' : 'no',
+    ].join(','));
+    res.type('text/csv').attachment('focus-log.csv')
+        .send(['day,study_minutes,lectures,lecture_minutes,meetings,meeting_minutes,total_minutes,study_target_met', ...rows].join('\n'));
 });
 
 app.delete('/api/history', (req, res) => {
