@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light dark">
-    <title>YouTube is closed</title>
+    <title>Blocked</title>
     <link rel="stylesheet" href="blocked.css">
 </head>
 
@@ -18,7 +18,14 @@
             <div class="bar"><div id="bar-fill"></div></div>
             <p class="meter-label" id="meter-label"></p>
         </div>
-        <a class="btn" href="http://localhost:7878" target="_blank">Open Focus</a>
+        <div class="actions" id="work" hidden>
+            <p class="actions-label">Start now</p>
+            <div class="action-row">
+                <button class="btn btn-solid" data-profile="scholar" data-minutes="50">Scholar · 50m</button>
+                <button class="btn btn-solid" data-profile="sidequest" data-minutes="50">Side Quest · 50m</button>
+            </div>
+        </div>
+        <a class="btn" id="open-focus" href="http://localhost:7878" target="_blank">Open Focus</a>
     </main>
     <script src="blocked.js"></script>
 </body>

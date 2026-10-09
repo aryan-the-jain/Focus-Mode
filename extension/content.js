@@ -50,13 +50,13 @@
         <style>
             .pill { display:none; align-items:center; gap:8px; padding:7px 12px; border-radius:999px;
                 font:500 13px/1 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif; font-variant-numeric:tabular-nums;
-                color:#ededeb; background:rgba(20,20,20,.82); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+                color:#f2f2f2; background:rgba(10,10,10,.85); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
                 box-shadow:0 4px 16px rgba(0,0,0,.25); transition:background .2s; }
             .pill.show { display:inline-flex; }
-            .dot { width:7px; height:7px; border-radius:50%; background:#5cbf9d; }
-            .pill.paused .dot { background:#8f8d88; }
-            .pill.low { background:rgba(150,80,10,.9); }
-            .pill.low .dot { background:#ffd08a; }
+            .dot { width:7px; height:7px; border-radius:50%; background:#f2f2f2; }
+            .pill.paused .dot { background:#5a5a5a; }
+            .pill.low { background:#f2f2f2; color:#0a0a0a; }
+            .pill.low .dot { background:#0a0a0a; }
         </style>
         <div class="pill"><span class="dot"></span><span class="text"></span></div>`;
     const pill = root.querySelector('.pill');
