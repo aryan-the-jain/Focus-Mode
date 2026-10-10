@@ -97,7 +97,7 @@ const defaultState = () => ({
     // Entertainment list: blocked every night, and during YouTube breaks (except breakExempt).
     night: { enabled: true, from: '22:30', until: '06:00', sites: [...DEFAULT_NIGHT_SITES], breakExempt: ['github.com'] },
     // Daily timers for sites metered by the extension (time the tab is in front of you).
-    timers: { linkedin: { label: 'LinkedIn', domain: 'linkedin.com', dailyMinutes: 10, enabled: true, pending: null } },
+    timers: { linkedin: { label: 'LinkedIn', domain: 'linkedin.com', dailyMinutes: 30, enabled: true, pending: null } },
     timerUsage: {}, // 'YYYY-MM-DD' -> { timerId: ms }
     // Weekly pass: once a week, on this day, entertainment is uncapped until the 4am reset.
     pass: { day: 5, activeUntil: 0, usedWeek: null }, // day: 0 = Sunday ... 5 = Friday
