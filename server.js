@@ -556,7 +556,8 @@ const extensionStatus = (now = Date.now()) => ({
     timers: timerStatus(now),
     loop: loopStatus(now),
     entertainment: {
-        reason: nightActive(now) ? 'night' : entertainmentBlocked(now).length ? youtubeAccess(now).reason : null,
+        // No reason when nothing is blocked (e.g. during the weekly pass), so blocked pages reopen.
+        reason: !entertainmentBlocked(now).length ? null : nightActive(now) ? 'night' : youtubeAccess(now).reason,
         sites: entertainmentBlocked(now),
         metered: state.allowance.enabled ? meteredEntertainment() : [],
         nightUntil: state.night.until,
