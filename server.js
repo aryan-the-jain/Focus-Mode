@@ -71,6 +71,8 @@ const defaultAllowance = () => ({
     breakMinutes: 30,
     openFrom: '08:00', // YouTube is blocked outside these hours
     openUntil: '23:00',
+    lateGraceMinutes: 0, // after closing, keep watching for up to this long if budget is left
+    lateUsage: {}, // 'YYYY-MM-DD' -> ms watched after closing
     usage: {}, // { 'YYYY-MM-DD': ms watched }
     sitting: { usedMs: 0, lastWatchedAt: 0 },
     cooldownUntil: 0,
@@ -302,6 +304,26 @@ const openWindow = (now = Date.now()) => {
     return { isOpen, opensAt, closesAt: end };
 };
 
+// After closing time on the current (4am-based) day: the late grace window.
+const lateWindow = (now = Date.now()) => {
+    const d = new Date(now - DAY_START_HOUR * 60 * 60 * 1000);
+    const closesAt = atTime(state.allowance.openUntil, d.getTime());
+    return { isLate: now >= closesAt, closesAt };
+};
+
+const lateUsedMs = (now = Date.now()) => {
+    const a = state.allowance;
+    const { closesAt } = lateWindow(now);
+    let used = (a.lateUsage || {})[dayKey(now)] || 0;
+    if (monitor.watching && monitor.watchingSince) {
+        const end = Math.min(now, monitor.lastSeenAt + ACCRUE_GRACE_MS);
+        used += Math.max(0, end - Math.max(monitor.watchingSince, closesAt));
+    }
+    return used;
+};
+
+const lateRemainingMs = (now = Date.now()) => Math.max(0, state.allowance.lateGraceMinutes * 60000 - lateUsedMs(now));
+
 // Next 4am, when today's budget resets.
 const nextDayStart = (ts = Date.now()) => {
     const d = new Date(ts);
@@ -343,6 +365,11 @@ const accrue = (now = Date.now()) => {
     const add = Math.max(0, end - monitor.watchingSince);
     const day = dayKey(monitor.watchingSince);
     a.usage[day] = Math.min((a.usage[day] || 0) + add, a.dailyMinutes * 60000);
+    const lateAdd = Math.max(0, end - Math.max(monitor.watchingSince, lateWindow(monitor.watchingSince).closesAt));
+    if (lateAdd) {
+        a.lateUsage = a.lateUsage || {};
+        a.lateUsage[day] = (a.lateUsage[day] || 0) + lateAdd;
+    }
     a.sitting.usedMs += add;
     a.sitting.lastWatchedAt = end;
 
@@ -401,7 +428,11 @@ const youtubeAccess = (now = Date.now()) => {
     if (state.mode === 'session') return { allowed: false, reason: 'focus' };
     if (state.mode === 'block') return { allowed: false, reason: 'block' };
     if (passActive(now)) return { allowed: true, reason: 'pass' };
-    if (!openWindow(now).isOpen) return { allowed: false, reason: 'hours' };
+    if (!openWindow(now).isOpen) {
+        // After closing, unused budget stays usable for a short grace period.
+        const late = lateWindow(now).isLate && lateRemainingMs(now) > 0;
+        if (!late) return { allowed: false, reason: 'hours' };
+    }
     if (dailyUsedMs(now) >= a.dailyMinutes * 60000) return { allowed: false, reason: 'daily' };
     if (now < a.cooldownUntil || sittingUsedMs(now) >= a.sittingMinutes * 60000) return { allowed: false, reason: 'cooldown' };
     if (!extensionConnected(now)) return { allowed: false, reason: 'extension' };
@@ -420,7 +451,9 @@ const youtubeStatus = (now = Date.now()) => {
     if (access.reason === 'cooldown') cooldownUntil = now < a.cooldownUntil ? a.cooldownUntil : now + a.breakMinutes * 60000;
     return {
         ...access,
-        remainingMs: Math.max(0, Math.min(dailyMs - daily, sittingMs - sitting, hours.closesAt - now)),
+        remainingMs: Math.max(0, Math.min(dailyMs - daily, sittingMs - sitting,
+            lateWindow(now).isLate ? lateRemainingMs(now) : hours.closesAt - now)),
+        late: lateWindow(now).isLate && access.allowed && access.reason === 'open',
         dailyUsedMs: daily,
         dailyMs,
         sittingUsedMs: sitting,
@@ -445,7 +478,7 @@ const pruneUsage = () => {
     });
 };
 
-const LIMITS = { dailyMinutes: [1, 720], sittingMinutes: [1, 240], breakMinutes: [0, 240] };
+const LIMITS = { dailyMinutes: [1, 720], sittingMinutes: [1, 240], breakMinutes: [0, 240], lateGraceMinutes: [0, 60] };
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -473,6 +506,7 @@ const isTightening = (oldA, next) => {
     return next.dailyMinutes <= oldA.dailyMinutes
         && next.sittingMinutes <= oldA.sittingMinutes
         && next.breakMinutes >= oldA.breakMinutes
+        && next.lateGraceMinutes <= (oldA.lateGraceMinutes || 0)
         && next.openFrom >= oldA.openFrom
         && next.openUntil <= oldA.openUntil;
 };
@@ -484,6 +518,7 @@ const applyAllowanceConfig = (next) => {
     a.dailyMinutes = next.dailyMinutes;
     a.sittingMinutes = next.sittingMinutes;
     a.breakMinutes = next.breakMinutes;
+    a.lateGraceMinutes = next.lateGraceMinutes;
     a.openFrom = next.openFrom;
     a.openUntil = next.openUntil;
     a.pending = null;
@@ -813,6 +848,7 @@ const publicAllowance = () => {
         dailyMinutes: a.dailyMinutes,
         sittingMinutes: a.sittingMinutes,
         breakMinutes: a.breakMinutes,
+        lateGraceMinutes: a.lateGraceMinutes,
         openFrom: a.openFrom,
         openUntil: a.openUntil,
         pending: a.pending,

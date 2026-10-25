@@ -100,6 +100,7 @@
         ytSitting: $('yt-sitting'),
         ytBreak: $('yt-break'),
         ytFrom: $('yt-from'),
+        ytLate: $('yt-late'),
         passRow: $('pass-row'),
         passDay: $('pass-day'),
         timerRows: $('timer-rows'),
@@ -649,7 +650,12 @@
                 label = sittingUsed > 0 ? 'This sitting' : 'Ready';
                 time = formatCountdown(remaining);
                 text = yt.watching ? 'Watching now. Counting down.' : sittingUsed > 0 ? 'Not watching. Paused.' : `Up to ${formatMinutes(remaining / 60000)} in one go.`;
-                if (yt.closesAt - t <= remaining + 1000) text += ` Closes at ${formatClock(yt.closesAt)}.`;
+                if (yt.late) {
+                    label = 'After closing';
+                    text = `Using what’s left of today, up to ${a.lateGraceMinutes} min after ${yt.openUntil}.`;
+                } else if (yt.closesAt - t <= remaining + 1000) {
+                    text += ` Closes at ${formatClock(yt.closesAt)}.`;
+                }
                 break;
             case 'hours':
                 label = 'Closed';
@@ -892,6 +898,7 @@
         el.ytSitting.value = draft.sittingMinutes;
         el.ytBreak.value = draft.breakMinutes;
         el.ytFrom.value = draft.openFrom;
+        el.ytLate.value = draft.lateGraceMinutes || 0;
         el.ytUntil.value = draft.openUntil;
         el.ytEdit.hidden = !draft.enabled;
         const pending = state.allowance.pending;
@@ -906,9 +913,11 @@
         breakMinutes: Number(el.ytBreak.value),
         openFrom: el.ytFrom.value,
         openUntil: el.ytUntil.value,
+        lateGraceMinutes: Number(el.ytLate.value),
     });
 
-    const sameAllowance = (a, b) => ['enabled', 'dailyMinutes', 'sittingMinutes', 'breakMinutes', 'openFrom', 'openUntil'].every((k) => a[k] === b[k]);
+    const sameAllowance = (a, b) => ['enabled', 'dailyMinutes', 'sittingMinutes', 'breakMinutes', 'openFrom', 'openUntil']
+        .every((k) => a[k] === b[k]) && (a.lateGraceMinutes || 0) === (b.lateGraceMinutes || 0);
 
     el.ytEnabled.addEventListener('change', () => { el.ytEdit.hidden = !el.ytEnabled.checked; });
 
