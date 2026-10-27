@@ -8,6 +8,7 @@ const SERVER = 'http://localhost:7878';
 const TAB_STALE_MS = 25 * 1000;
 const MIN_INTERVAL_MS = 5 * 1000;
 const IDLE_SECONDS = 60;
+const QUICK_SWITCH_MS = 45 * 1000; // a switch only counts toward a loop if you left the last site this fast
 
 const tabs = new Map(); // YouTube tabId -> { playing, visible, at }
 let status = null;
@@ -167,13 +168,17 @@ const updateBadge = async () => {
 const noteVisit = async (url) => {
     const app = loopApp(url);
     if (!app || !status.loop.enabled || status.loop.active) return;
-    const { loopState = { last: null, hops: [] } } = await chrome.storage.session.get('loopState');
+    const { loopState = { last: null, since: 0, hops: [] } } = await chrome.storage.session.get('loopState');
     if (app === loopState.last) return;
     const now = Date.now();
     const windowMs = status.loop.windowMinutes * 60000;
-    loopState.hops = loopState.hops.filter((h) => now - h.at < windowMs);
-    if (loopState.last) loopState.hops.push({ app, at: now });
+    // Only quick flicks count. Staying on a site for a while (writing an email,
+    // reading a profile) is real work, so it resets the count.
+    const quick = Boolean(loopState.last) && now - (loopState.since || 0) < QUICK_SWITCH_MS;
+    loopState.hops = quick ? loopState.hops.filter((h) => now - h.at < windowMs) : [];
+    if (quick) loopState.hops.push({ app, at: now });
     loopState.last = app;
+    loopState.since = now;
 
     if (loopState.hops.length >= status.loop.hops) {
         const apps = loopState.hops.map((h) => h.app);
